@@ -1,0 +1,19 @@
+apply plugin: 'java'
+
+repositories {
+    jcenter()
+}
+
+dependencies {
+    compile 'org.slf4j:slf4j-api:1.7.7'
+    compile 'args4j:args4j:2.0.29'
+    compile 'redis.clients:jedis:2.6.2'
+    compile 'com.amazonaws:aws-java-sdk:1.9.17'
+    compile 'com.fasterxml.jackson.core:jackson-core:2.5.0'
+    compile 'com.google.inject:guice:3.0'
+    compile 'io.reactivex:rxjava:1.0.4'
+    compile 'org.apache.commons:commons-lang3:3.3.2'
+
+
+    testCompile "junit:junit:4.11"
+}
