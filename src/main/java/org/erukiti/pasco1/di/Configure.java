@@ -29,6 +29,7 @@ import com.amazonaws.ClientConfiguration;
 import com.amazonaws.Protocol;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.services.s3.AmazonS3Client;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
@@ -51,7 +52,7 @@ public class Configure {
         ObjectMapper mapper = new ObjectMapper();
 
         String configJson = Files.readAllLines(Paths.get(confpath)).stream().collect(Collectors.joining());
-        Map<String, String> config = mapper.readValue(configJson, Map.class);
+        Map<String, String> config = mapper.readValue(configJson, new TypeReference<Map<String, String>>(){});
 
         String s3Key = config.get("s3_key");
         String s3Secret = config.get("s3_secret");

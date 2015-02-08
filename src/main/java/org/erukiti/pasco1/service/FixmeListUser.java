@@ -25,16 +25,17 @@
 
 package org.erukiti.pasco1.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.inject.Inject;
 import org.erukiti.pasco1.repository.S3Observable;
 import org.erukiti.pasco1.model.TreeNode;
-import org.erukiti.pasco1.model.TreeNodes;
 import org.erukiti.pasco1.model.User;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import rx.Observable;
 
 import java.io.IOException;
+import java.util.Map;
 
 public class FixmeListUser {
     final private JedisPool pool;
@@ -47,10 +48,10 @@ public class FixmeListUser {
     }
 
     private Observable<String> searchUser(String hashID) {
-        Observable<TreeNodes> stream = s3Observable.read(hashID, TreeNodes.class);
-        return stream.flatMap(treeNodes -> {
+        Observable<Map<String, TreeNode>> stream = s3Observable.read(hashID, new TypeReference<Map<String, TreeNode>>(){});
+        return stream.flatMap(treeNodeMap -> {
             return Observable.create((Observable.OnSubscribe<String>) subscriber -> {
-                treeNodes.treeNodeMap.forEach((key, treeNode) -> {
+                treeNodeMap.forEach((key, treeNode) -> {
                     if (treeNode.type == TreeNode.Type.File) {
                         subscriber.onNext(treeNode.hashId);
                     } else {
@@ -78,7 +79,7 @@ public class FixmeListUser {
             });
             Observable<User> userStream = hashIDStream
                     .flatMap(this::searchUser)
-                    .flatMap(hashID -> s3Observable.read(hashID, User.class));
+                    .flatMap(hashID -> s3Observable.read(hashID, new TypeReference<User>(){}));
             userStream.subscribe(user -> {
                 if (user.isAdmin) {
                     System.out.printf("* %s(%s)\n", user.id, user.nick);

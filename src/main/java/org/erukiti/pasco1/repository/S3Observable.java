@@ -30,6 +30,7 @@ import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.PutObjectResult;
 import com.amazonaws.services.s3.model.S3Object;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.inject.Inject;
 import rx.Observable;
@@ -54,18 +55,16 @@ public class S3Observable {
         this.digest = digest;
     }
 
-    public <T> Observable<T> read(String hashID, Class<?> target) {
+    public <T> Observable<T> read(String hashID, TypeReference<T> typeReference) {
         return Observable.create((Observable.OnSubscribe<T>)subscriber -> {
             S3Object obj = s3.getObject("user", hashID);
             BufferedReader br = new BufferedReader(new InputStreamReader(obj.getObjectContent()));
             String text = br.lines().collect(Collectors.joining());
             try {
-                T data = mapper.readValue(text, mapper.getTypeFactory().constructType(Class.forName(target.getName())));
+                T data = mapper.readValue(text, typeReference);
                 subscriber.onNext(data);
                 subscriber.onCompleted();
             } catch (IOException e) {
-                subscriber.onError(e);
-            } catch (ClassNotFoundException e) {
                 subscriber.onError(e);
             }
         });
@@ -85,8 +84,10 @@ public class S3Observable {
         }
 
         String hashID = getHashID(json.getBytes());
-        PutObjectResult result = s3.putObject("user", hashID, new ByteArrayInputStream(json.getBytes()), new ObjectMetadata());
-        System.out.println(result);
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(json.getBytes().length);
+        PutObjectResult result = s3.putObject("user", hashID, new ByteArrayInputStream(json.getBytes()), metadata);
+//        System.out.println(result);
         return Observable.just(hashID);
     }
 

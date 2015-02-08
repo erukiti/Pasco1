@@ -25,17 +25,17 @@
 
 package org.erukiti.pasco1.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.inject.Inject;
 import org.apache.commons.lang3.tuple.Pair;
 import org.erukiti.pasco1.repository.S3Observable;
 import org.erukiti.pasco1.model.TreeNode;
-import org.erukiti.pasco1.model.TreeNodes;
 import org.erukiti.pasco1.model.User;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import rx.Observable;
 
-import java.util.Arrays;
+import java.util.*;
 import java.util.function.Function;
 
 public class FixmeCreateUser {
@@ -49,15 +49,14 @@ public class FixmeCreateUser {
     }
 
     private Observable<Function<String, Observable<String>>> generator(String hashID, String[] pathSplited) {
-        System.out.println(String.join(",", pathSplited));
-        Observable<TreeNodes> stream;
+        Observable<Map<String, TreeNode>> stream;
         if (hashID == null)  {
-            stream = Observable.just(new TreeNodes());
+            stream = Observable.just(new HashMap<String, TreeNode>(){});
         } else {
-            stream = s3stream.read(hashID, TreeNodes.class);
+            stream = s3stream.read(hashID, new TypeReference<Map<String, TreeNode>>() {});
         }
-        return stream.flatMap(treeNodes -> {
-            TreeNode treeNode = treeNodes.treeNodeMap.get(pathSplited[0]);
+        return stream.flatMap(treeNodeMap -> {
+            TreeNode treeNode = treeNodeMap.get(pathSplited[0]);
             String nextHashID = null;
             if (treeNode != null) {
                 if (pathSplited.length > 1 && treeNode.type == TreeNode.Type.File) {
@@ -79,8 +78,8 @@ public class FixmeCreateUser {
             }
 
             Function<String, Observable<String>> function = hashId -> {
-                treeNodes.treeNodeMap.put(pathSplited[0], new TreeNode(hashId, type));
-                return s3stream.write(treeNodes);
+                treeNodeMap.put(pathSplited[0], new TreeNode(hashId, type));
+                return s3stream.write(treeNodeMap);
             };
             return ret.mergeWith(Observable.just(function));
         });
@@ -97,7 +96,7 @@ public class FixmeCreateUser {
             Observable<Function<String, Observable<String>>> writeStream = Observable.just(blobWriteFunction).mergeWith(stream
                     .concatMap(pair -> generator(pair.getLeft(), pair.getRight())));
 
-            // FIXME: concatMap と reduce 合わせたみたいな方法があれば、x.apply を toBlocking しなくてすむのに…？
+            // Won(*3*)chu FixMe!: concatMap と reduce 合わせたみたいな方法があれば、x.apply を toBlocking しなくてすむのに…？
             writeStream.reduce((String)null, (hashID, x) -> x.apply(hashID).toBlocking().first()).subscribe(hashID -> {
                 jedis.set("user", hashID);
             }, err -> {
