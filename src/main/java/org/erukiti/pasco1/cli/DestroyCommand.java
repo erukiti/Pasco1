@@ -26,51 +26,20 @@
 package org.erukiti.pasco1.cli;
 
 import org.erukiti.pasco1.di.Configure;
-import org.kohsuke.args4j.Argument;
-import org.kohsuke.args4j.CmdLineException;
-import org.kohsuke.args4j.CmdLineParser;
+import org.erukiti.pasco1.service.FixmeDeleteAllUser;
 import org.kohsuke.args4j.Option;
-import org.kohsuke.args4j.spi.SubCommand;
-import org.kohsuke.args4j.spi.SubCommandHandler;
-import org.kohsuke.args4j.spi.SubCommands;
 
-import java.io.IOException;
-import java.security.NoSuchAlgorithmException;
+public class DestroyCommand implements Command {
+    @Option(name = "-f", aliases = "--force")
+    private boolean isForce = false;
 
-public class Main {
-    @Option(name = "-c")
-    String confpath = null;
+    @Option(name = "--all-users")
+    private boolean isAllUsers = false;
 
-    @Argument(handler = SubCommandHandler.class)
-    @SubCommands({
-            @SubCommand(name = "team", impl = TeamCommand.class),
-            @SubCommand(name = "user", impl = UserCommand.class),
-            @SubCommand(name = "destroy", impl = DestroyCommand.class)
-    })
-    Command command;
-
-    public static void main(String[] args) {
-        Main main = new Main();
-        main.run(args);
-    }
-
-    public void run(String[] args) {
-        try {
-            if (confpath == null) {
-                confpath = System.getenv("HOME") + "/.pasco1.json";
-            }
-            Configure configure = new Configure(confpath);
-            new CmdLineParser(this).parseArgument(args);
-            if (command != null) {
-                command.run(configure);
-            }
-        } catch (CmdLineException e) {
-            e.printStackTrace();
-            // FIXME: usage
-        } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
+    @Override
+    public void run(Configure configure) {
+        if (isForce && isAllUsers) {
+            configure.getInjector().getInstance(FixmeDeleteAllUser.class).deleteAllUser();
         }
     }
 }

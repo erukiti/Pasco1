@@ -72,10 +72,8 @@ public class FixmeListUser {
                 String hashID = jedis.get("user");
                 if (hashID != null) {
                     subscriber.onNext(hashID);
-                    subscriber.onCompleted();
-                } else {
-                    subscriber.onError(new IOException("Redis user key is not found"));
                 }
+                subscriber.onCompleted();
             });
             Observable<User> userStream = hashIDStream
                     .flatMap(this::searchUser)
