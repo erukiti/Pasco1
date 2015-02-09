@@ -28,32 +28,35 @@ package org.erukiti.pasco1.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.inject.Inject;
 import org.apache.commons.lang3.tuple.Pair;
-import org.erukiti.pasco1.repository.S3Observable;
+import org.erukiti.pasco1.model.Bucket;
+import org.erukiti.pasco1.model.Meta;
 import org.erukiti.pasco1.model.TreeNode;
-import org.erukiti.pasco1.model.User;
+import org.erukiti.pasco1.repository.S3Observable;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import rx.Observable;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Function;
 
-public class FixmeCreateUser {
-    final private JedisPool pool;
+public class FixmeCreateDocument {
     final private S3Observable s3Observable;
+    final private JedisPool pool;
 
     @Inject
-    public FixmeCreateUser(JedisPool pool, S3Observable s3Observable) {
-        this.pool = pool;
+    public FixmeCreateDocument(S3Observable s3Observable, JedisPool pool) {
         this.s3Observable = s3Observable;
+        this.pool = pool;
     }
 
-    private Observable<Function<String, Observable<String>>> generator(String hashID, String[] pathSplitted) {
+    private Observable<Function<String, Observable<String>>> generator(String team, String hashID, String[] pathSplitted) {
         Observable<Map<String, TreeNode>> stream;
         if (hashID == null)  {
             stream = Observable.just(new HashMap<String, TreeNode>(){});
         } else {
-            stream = s3Observable.read("user", hashID, new TypeReference<Map<String, TreeNode>>() {});
+            stream = s3Observable.read(team, hashID, new TypeReference<Map<String, TreeNode>>() {});
         }
         return stream.flatMap(treeNodeMap -> {
             TreeNode treeNode = treeNodeMap.get(pathSplitted[0]);
@@ -71,7 +74,7 @@ public class FixmeCreateUser {
             Observable<Function<String, Observable<String>>> ret;
             if (pathSplitted.length > 1) {
                 type = TreeNode.Type.Dir;
-                ret = generator(nextHashID, Arrays.copyOfRange(pathSplitted, 1, pathSplitted.length));
+                ret = generator(team, nextHashID, Arrays.copyOfRange(pathSplitted, 1, pathSplitted.length));
             } else {
                 type = TreeNode.Type.File;
                 ret = Observable.empty();
@@ -79,31 +82,50 @@ public class FixmeCreateUser {
 
             Function<String, Observable<String>> function = hashId -> {
                 treeNodeMap.put(pathSplitted[0], new TreeNode(hashId, type));
-                return s3Observable.writeObject("user", treeNodeMap);
+                return s3Observable.writeObject(team, treeNodeMap);
             };
             return ret.mergeWith(Observable.just(function));
         });
     }
 
-    public void create(User user) {
-        String path = user.id.substring(0, 2) + "/" + user.id;
-
+    // Won(*3*) Chu FixMe!: まじめに書き直す
+    public void createDocument(String team, String path, String text) {
         try (Jedis jedis = pool.getResource()) {
-            Observable<Pair<String, String[]>> stream = Observable.just(Pair.of(jedis.get("user"), path.split("/")));
+            String hashID2 = jedis.get("bucket-" + team);
 
-            Function<String, Observable<String>> blobWriteFunction = hashID -> s3Observable.writeObject("user", user);
+            if (hashID2 == null) {
+                return;
+            }
 
-            Observable<Function<String, Observable<String>>> writeStream = Observable.just(blobWriteFunction).mergeWith(stream
-                    .concatMap(pair -> generator(pair.getLeft(), pair.getRight())));
+            Bucket bucket = s3Observable.read(team, hashID2, new TypeReference<Bucket>() {}).toBlocking().first();
+            String hashID3 = bucket.hashID;
+            Function<String, Observable<String>> bucketWriteFunction = hashID -> {
+                bucket.previous = bucket.hashID;
+                bucket.hashID = hashID;
+                return s3Observable.writeObject(team, bucket);
+            };
 
-            // Won(*3*)chu FixMe!: concatMap と reduce 合わせたみたいな方法があれば、x.apply を toBlocking しなくてすむのに…？
+            Function<String, Observable<String>> blobWriteFunction = hashID -> s3Observable.writeText(team, text);
+
+            Function<String, Observable<String>> metaWriteFunction = hashID -> {
+                Meta meta = new Meta();
+                meta.hashID = hashID;
+                return s3Observable.writeObject(team, meta);
+            };
+
+            Observable<Pair<String, String[]>> stream = Observable.just(Pair.of(hashID3, path.split("/")));
+
+            Observable<Function<String, Observable<String>>> writeStream = Observable.just(blobWriteFunction, metaWriteFunction)
+                    .mergeWith(stream.concatMap(pair -> generator(team, pair.getLeft(), pair.getRight())))
+                    .mergeWith(Observable.just(bucketWriteFunction));
+
+            // Won(*3*) Chu FixMe!: concatMap と reduce 合わせたみたいな方法があれば、x.apply を toBlocking しなくてすむのに…？
             writeStream.reduce((String)null, (hashID, x) -> x.apply(hashID).toBlocking().first()).subscribe(hashID -> {
-                jedis.set("user", hashID);
+                jedis.set("bucket-" + team , hashID);
             }, err -> {
                 err.printStackTrace();
             });
         }
         pool.destroy();
     }
-
 }

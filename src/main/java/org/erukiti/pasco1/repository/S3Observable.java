@@ -75,7 +75,8 @@ public class S3Observable {
         return IntStream.range(0, hash.length).mapToObj(i -> String.format("%02x",hash[i])).collect(Collectors.joining());
     }
 
-    public <T> Observable<String> write(String bucket, T obj) {
+    // Won(*3*) Chu FixMe: writeTextを使うように書き換える
+    public <T> Observable<String> writeObject(String bucket, T obj) {
         String json;
         try {
             json = mapper.writeValueAsString(obj);
@@ -88,6 +89,14 @@ public class S3Observable {
         metadata.setContentLength(json.getBytes().length);
         PutObjectResult result = s3.putObject(bucket, hashID, new ByteArrayInputStream(json.getBytes()), metadata);
 //        System.out.println(result);
+        return Observable.just(hashID);
+    }
+
+    public Observable<String> writeText(String bucket, String text) {
+        String hashID = getHashID(text.getBytes());
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(text.getBytes().length);
+        PutObjectResult result = s3.putObject(bucket, hashID, new ByteArrayInputStream(text.getBytes()), metadata);
         return Observable.just(hashID);
     }
 

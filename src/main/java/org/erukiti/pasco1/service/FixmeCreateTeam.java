@@ -47,7 +47,7 @@ public class FixmeCreateTeam {
         try (Jedis jedis = pool.getResource()) {
             s3Observable.createBucket(id);
             Bucket bucket = new Bucket(name, isPrivate, admin);
-            s3Observable.write(id, bucket).subscribe(hashID -> {
+            s3Observable.writeObject(id, bucket).subscribe(hashID -> {
                 jedis.set("bucket-" + id, hashID);
             });
         }

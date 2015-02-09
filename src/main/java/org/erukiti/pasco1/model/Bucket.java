@@ -28,8 +28,8 @@ package org.erukiti.pasco1.model;
 public class Bucket {
     public boolean isPrivate;
     public String name;
-    public HashID hashID;
-    public HashID previous;
+    public String hashID;
+    public String previous;
     public String[] admin;
 
     public Bucket() {

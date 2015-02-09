@@ -23,18 +23,24 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.erukiti.pasco1.model;
+package org.erukiti.pasco1.cli;
 
-import org.joda.time.DateTime;
+import org.erukiti.pasco1.cli.document.DocumentCreateCommand;
+import org.erukiti.pasco1.di.Configure;
+import org.kohsuke.args4j.Argument;
+import org.kohsuke.args4j.spi.SubCommand;
+import org.kohsuke.args4j.spi.SubCommandHandler;
+import org.kohsuke.args4j.spi.SubCommands;
 
-public class Meta {
-    public String createdAuthor;
-    public String modifiedAuthor;
-    public DateTime createdAt;
-    public DateTime modifiedAt;
-    public String hashID;
-    public String[] Tag;
-    public String previous;
-    public String contentType;
+public class DocumentCommand implements Command {
+    @Argument(handler = SubCommandHandler.class)
+    @SubCommands(
+            @SubCommand(name = "create", impl = DocumentCreateCommand.class)
+    )
+    Command command;
 
+    @Override
+    public void run(Configure configure) {
+        command.run(configure);
+    }
 }

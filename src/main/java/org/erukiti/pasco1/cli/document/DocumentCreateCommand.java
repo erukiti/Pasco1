@@ -23,18 +23,24 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.erukiti.pasco1.model;
+package org.erukiti.pasco1.cli.document;
 
-import org.joda.time.DateTime;
+import org.erukiti.pasco1.cli.Command;
+import org.erukiti.pasco1.di.Configure;
+import org.erukiti.pasco1.service.FixmeCreateDocument;
+import org.kohsuke.args4j.Argument;
 
-public class Meta {
-    public String createdAuthor;
-    public String modifiedAuthor;
-    public DateTime createdAt;
-    public DateTime modifiedAt;
-    public String hashID;
-    public String[] Tag;
-    public String previous;
-    public String contentType;
+public class DocumentCreateCommand implements Command {
+    @Argument(index = 0)
+    String team;
 
+    @Argument(index = 1)
+    String path;
+
+    @Override
+    public void run(Configure configure) {
+        String document = "ほげー¥n";
+
+        configure.getInjector().getInstance(FixmeCreateDocument.class).createDocument(team, path, document);
+    }
 }

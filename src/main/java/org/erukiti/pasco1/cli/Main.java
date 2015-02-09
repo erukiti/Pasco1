@@ -45,7 +45,8 @@ public class Main {
     @SubCommands({
             @SubCommand(name = "team", impl = TeamCommand.class),
             @SubCommand(name = "user", impl = UserCommand.class),
-            @SubCommand(name = "destroy", impl = DestroyCommand.class)
+            @SubCommand(name = "destroy", impl = DestroyCommand.class),
+            @SubCommand(name = "document", impl = DocumentCommand.class)
     })
     Command command;
 
@@ -65,6 +66,7 @@ public class Main {
                 command.run(configure);
             }
         } catch (CmdLineException e) {
+            e.getParser().printUsage(System.out);
             e.printStackTrace();
             // FIXME: usage
         } catch (NoSuchAlgorithmException e) {
