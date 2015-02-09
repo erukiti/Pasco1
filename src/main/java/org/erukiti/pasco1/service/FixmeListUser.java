@@ -48,7 +48,7 @@ public class FixmeListUser {
     }
 
     private Observable<String> searchUser(String hashID) {
-        Observable<Map<String, TreeNode>> stream = s3Observable.read(hashID, new TypeReference<Map<String, TreeNode>>(){});
+        Observable<Map<String, TreeNode>> stream = s3Observable.read("user", hashID, new TypeReference<Map<String, TreeNode>>(){});
         return stream.flatMap(treeNodeMap -> {
             return Observable.create((Observable.OnSubscribe<String>) subscriber -> {
                 treeNodeMap.forEach((key, treeNode) -> {
@@ -77,7 +77,7 @@ public class FixmeListUser {
             });
             Observable<User> userStream = hashIDStream
                     .flatMap(this::searchUser)
-                    .flatMap(hashID -> s3Observable.read(hashID, new TypeReference<User>(){}));
+                    .flatMap(hashID -> s3Observable.read("user", hashID, new TypeReference<User>(){}));
             userStream.subscribe(user -> {
                 if (user.isAdmin) {
                     System.out.printf("* %s(%s)\n", user.id, user.nick);

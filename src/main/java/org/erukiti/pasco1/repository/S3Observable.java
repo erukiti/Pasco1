@@ -55,9 +55,9 @@ public class S3Observable {
         this.digest = digest;
     }
 
-    public <T> Observable<T> read(String hashID, TypeReference<T> typeReference) {
+    public <T> Observable<T> read(String bucket, String hashID, TypeReference<T> typeReference) {
         return Observable.create((Observable.OnSubscribe<T>)subscriber -> {
-            S3Object obj = s3.getObject("user", hashID);
+            S3Object obj = s3.getObject(bucket, hashID);
             BufferedReader br = new BufferedReader(new InputStreamReader(obj.getObjectContent()));
             String text = br.lines().collect(Collectors.joining());
             try {
@@ -75,7 +75,7 @@ public class S3Observable {
         return IntStream.range(0, hash.length).mapToObj(i -> String.format("%02x",hash[i])).collect(Collectors.joining());
     }
 
-    public <T> Observable<String> write(T obj) {
+    public <T> Observable<String> write(String bucket, T obj) {
         String json;
         try {
             json = mapper.writeValueAsString(obj);
@@ -86,9 +86,12 @@ public class S3Observable {
         String hashID = getHashID(json.getBytes());
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(json.getBytes().length);
-        PutObjectResult result = s3.putObject("user", hashID, new ByteArrayInputStream(json.getBytes()), metadata);
+        PutObjectResult result = s3.putObject(bucket, hashID, new ByteArrayInputStream(json.getBytes()), metadata);
 //        System.out.println(result);
         return Observable.just(hashID);
     }
 
+    public void createBucket(String name) {
+        s3.createBucket(name);
+    }
 }

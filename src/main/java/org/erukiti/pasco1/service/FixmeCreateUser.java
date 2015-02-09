@@ -53,7 +53,7 @@ public class FixmeCreateUser {
         if (hashID == null)  {
             stream = Observable.just(new HashMap<String, TreeNode>(){});
         } else {
-            stream = s3stream.read(hashID, new TypeReference<Map<String, TreeNode>>() {});
+            stream = s3stream.read("user", hashID, new TypeReference<Map<String, TreeNode>>() {});
         }
         return stream.flatMap(treeNodeMap -> {
             TreeNode treeNode = treeNodeMap.get(pathSplited[0]);
@@ -79,7 +79,7 @@ public class FixmeCreateUser {
 
             Function<String, Observable<String>> function = hashId -> {
                 treeNodeMap.put(pathSplited[0], new TreeNode(hashId, type));
-                return s3stream.write(treeNodeMap);
+                return s3stream.write("user", treeNodeMap);
             };
             return ret.mergeWith(Observable.just(function));
         });
@@ -91,7 +91,7 @@ public class FixmeCreateUser {
         try (Jedis jedis = pool.getResource()) {
             Observable<Pair<String, String[]>> stream = Observable.just(Pair.of(jedis.get("user"), path.split("/")));
 
-            Function<String, Observable<String>> blobWriteFunction = hashID -> s3stream.write(user);
+            Function<String, Observable<String>> blobWriteFunction = hashID -> s3stream.write("user", user);
 
             Observable<Function<String, Observable<String>>> writeStream = Observable.just(blobWriteFunction).mergeWith(stream
                     .concatMap(pair -> generator(pair.getLeft(), pair.getRight())));

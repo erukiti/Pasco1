@@ -30,5 +30,16 @@ public class Bucket {
     public String name;
     public HashID hashID;
     public HashID previous;
-    public String[] Admin;
+    public String[] admin;
+
+    public Bucket() {
+
+    }
+
+    public Bucket(String name, boolean isPrivate, String[] admin) {
+        this.name = name;
+        this.isPrivate = isPrivate;
+        this.admin = admin;
+    }
+
 }

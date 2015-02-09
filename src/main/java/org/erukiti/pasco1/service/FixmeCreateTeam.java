@@ -23,29 +23,35 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.erukiti.pasco1.cli.team;
+package org.erukiti.pasco1.service;
 
-import org.erukiti.pasco1.cli.Command;
-import org.erukiti.pasco1.di.Configure;
-import org.erukiti.pasco1.service.FixmeCreateTeam;
-import org.kohsuke.args4j.Argument;
-import org.kohsuke.args4j.Option;
-import org.kohsuke.args4j.spi.StringArrayOptionHandler;
+import com.google.inject.Inject;
+import org.erukiti.pasco1.model.Bucket;
+import org.erukiti.pasco1.repository.S3Observable;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
 
-public class TeamCreateCommand implements Command {
-    @Option(name="--private")
-    private boolean isPrivate = false;
+public class FixmeCreateTeam {
+    final private S3Observable s3Observable;
+    final private JedisPool pool;
 
-    @Option(name="--name", required = true)
-    private String name;
-
-    @Option(name="--id", required = true)
-    private String id;
-
-    @Option(name="--admin", required = true)
-    private String admin;
-
-    public void run(Configure configure) {
-        configure.getInjector().getInstance(FixmeCreateTeam.class).createTeam(id, name, isPrivate, admin.split(","));
+    @Inject
+    public FixmeCreateTeam(S3Observable s3Observable, JedisPool pool) {
+        this.s3Observable = s3Observable;
+        this.pool = pool;
     }
+
+    public void createTeam(String id, String name, boolean isPrivate, String[] admin) {
+        // Won(*3*) Chu FixMe: id の validation
+
+        try (Jedis jedis = pool.getResource()) {
+            s3Observable.createBucket(id);
+            Bucket bucket = new Bucket(name, isPrivate, admin);
+            s3Observable.write(id, bucket).subscribe(hashID -> {
+                jedis.set("bucket-" + id, hashID);
+            });
+        }
+        pool.destroy();
+    }
+
 }
