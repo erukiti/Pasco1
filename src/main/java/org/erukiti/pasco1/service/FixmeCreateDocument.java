@@ -36,9 +36,7 @@ import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import rx.Observable;
 
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.function.Function;
 
 public class FixmeCreateDocument {
@@ -51,12 +49,12 @@ public class FixmeCreateDocument {
         this.pool = pool;
     }
 
-    private Observable<Function<String, Observable<String>>> generator(String team, String hashID, String[] pathSplitted) {
+    private Observable<Function<String, Observable<String>>> generator(String bucket, String hashID, String[] pathSplitted) {
         Observable<Map<String, TreeNode>> stream;
         if (hashID == null)  {
             stream = Observable.just(new HashMap<String, TreeNode>(){});
         } else {
-            stream = s3Observable.read(team, hashID, new TypeReference<Map<String, TreeNode>>() {});
+            stream = s3Observable.read(bucket, hashID, new TypeReference<Map<String, TreeNode>>() {});
         }
         return stream.flatMap(treeNodeMap -> {
             TreeNode treeNode = treeNodeMap.get(pathSplitted[0]);
@@ -74,7 +72,7 @@ public class FixmeCreateDocument {
             Observable<Function<String, Observable<String>>> ret;
             if (pathSplitted.length > 1) {
                 type = TreeNode.Type.Dir;
-                ret = generator(team, nextHashID, Arrays.copyOfRange(pathSplitted, 1, pathSplitted.length));
+                ret = generator(bucket, nextHashID, Arrays.copyOfRange(pathSplitted, 1, pathSplitted.length));
             } else {
                 type = TreeNode.Type.File;
                 ret = Observable.empty();
@@ -82,7 +80,7 @@ public class FixmeCreateDocument {
 
             Function<String, Observable<String>> function = hashId -> {
                 treeNodeMap.put(pathSplitted[0], new TreeNode(hashId, type));
-                return s3Observable.writeObject(team, treeNodeMap);
+                return s3Observable.writeObject(bucket, treeNodeMap);
             };
             return ret.mergeWith(Observable.just(function));
         });
@@ -90,41 +88,81 @@ public class FixmeCreateDocument {
 
     // Won(*3*) Chu FixMe!: まじめに書き直す
     public void createDocument(String team, String path, String text) {
+        // Won(*3*) Chu FixMe!: path の正規化
+
         try (Jedis jedis = pool.getResource()) {
-            String hashID2 = jedis.get("bucket-" + team);
+            LinkedList<Function<Pair<String, Observable<Function<String, Observable<String>>>>, Pair<String, Observable<Function<String, Observable<String>>>>>> list = new LinkedList();
+            list.add(pair -> {
+                String hashID = jedis.get("bucket-" + team);
+                Observable<Function<String, Observable<String>>> stream = pair.getRight();
 
-            if (hashID2 == null) {
-                return;
-            }
+                Function<String, Observable<String>> func = hashID2 -> {
+                    jedis.set("bucket-" + team, hashID2);
+                    return Observable.empty();
+                };
 
-            Bucket bucket = s3Observable.read(team, hashID2, new TypeReference<Bucket>() {}).toBlocking().first();
-            String hashID3 = bucket.hashID;
-            Function<String, Observable<String>> bucketWriteFunction = hashID -> {
-                bucket.previous = bucket.hashID;
-                bucket.hashID = hashID;
-                return s3Observable.writeObject(team, bucket);
-            };
-
-            Function<String, Observable<String>> blobWriteFunction = hashID -> s3Observable.writeText(team, text);
-
-            Function<String, Observable<String>> metaWriteFunction = hashID -> {
-                Meta meta = new Meta();
-                meta.hashID = hashID;
-                return s3Observable.writeObject(team, meta);
-            };
-
-            Observable<Pair<String, String[]>> stream = Observable.just(Pair.of(hashID3, path.split("/")));
-
-            Observable<Function<String, Observable<String>>> writeStream = Observable.just(blobWriteFunction, metaWriteFunction)
-                    .mergeWith(stream.concatMap(pair -> generator(team, pair.getLeft(), pair.getRight())))
-                    .mergeWith(Observable.just(bucketWriteFunction));
-
-            // Won(*3*) Chu FixMe!: concatMap と reduce 合わせたみたいな方法があれば、x.apply を toBlocking しなくてすむのに…？
-            writeStream.reduce((String)null, (hashID, x) -> x.apply(hashID).toBlocking().first()).subscribe(hashID -> {
-                jedis.set("bucket-" + team , hashID);
-            }, err -> {
-                err.printStackTrace();
+                return Pair.of(hashID, Observable.just(func).mergeWith(stream));
             });
+
+            list.add(pair -> {
+                String hashID = pair.getLeft();
+                Observable<Function<String, Observable<String>>> stream = pair.getRight();
+
+                Bucket bucket = s3Observable.read(team, hashID, new TypeReference<Bucket>() {}).toBlocking().first();
+
+                Function<String, Observable<String>> bucketWriteFunction = hashID2 -> {
+                    bucket.previous = bucket.hashID;
+                    bucket.hashID = hashID2;
+                    return s3Observable.writeObject(team, bucket);
+                };
+
+                return Pair.of(bucket.hashID, Observable.just(bucketWriteFunction).mergeWith(stream));
+            });
+
+            list.add(pair -> {
+                String hashID = pair.getLeft();
+                Observable<Function<String, Observable<String>>> stream = pair.getRight();
+
+                return Pair.of("", Observable.just(Pair.of(hashID, path.split("/"))).concatMap(pair2 -> generator(team, pair2.getLeft(), pair2.getRight())).mergeWith(stream));
+            });
+
+            list.add(pair -> {
+                Observable<Function<String, Observable<String>>> stream = pair.getRight();
+
+                Function<String, Observable<String>> metaWriteFunction = hashID -> {
+                    Meta meta = new Meta();
+                    meta.hashID = hashID;
+                    return s3Observable.writeObject(team, meta);
+                };
+
+                return Pair.of("", Observable.just(metaWriteFunction).mergeWith(stream));
+            });
+
+            list.add(pair -> {
+                Observable<Function<String, Observable<String>>> stream = pair.getRight();
+
+                Function<String, Observable<String>> blobWriteFunction = hashID -> s3Observable.writeText(team, text);
+
+                return Pair.of("", Observable.just(blobWriteFunction).mergeWith(stream));
+            });
+
+            Pair<String, Observable<Function<String, Observable<String>>>> init = Pair.of("", Observable.<Function<String, Observable<String>>>empty());
+            Observable.from(list).reduce(init, (pair, func) -> func.apply(pair)).subscribe(
+                    hoge -> {
+                        System.out.println(hoge.getLeft());
+                        System.out.println(hoge);
+                        hoge.getRight().reduce("", (hashID, x) -> {
+                            return x.apply(hashID).toBlocking().first();
+                        }).subscribe(hashID -> {
+                            System.out.println(hashID);
+                        }, err -> {
+                            err.printStackTrace();
+                        });
+                    },
+                    err -> {
+                        err.printStackTrace();
+                    }
+            );
         }
         pool.destroy();
     }
