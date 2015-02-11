@@ -25,6 +25,38 @@
 
 package org.erukiti.pasco1.model;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+
+@JsonSerialize(using = HashIDSerializer.class)
+@JsonDeserialize(using = HashIDDeserializer.class)
 public class HashID {
-    public String hash;
+    private String hash;
+
+    public HashID(String hash) {
+        this.hash = hash.toLowerCase();
+    }
+
+    public String getHash() {
+        return hash;
+    }
+
+    @Override
+    public String toString() {
+        return "@" + hash;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (!(obj instanceof HashID)) {
+            return false;
+        }
+        HashID that = (HashID)obj;
+        return this.getHash().equals(that.getHash());
+    }
+
+    @Override
+    public int hashCode() {
+        return hash.hashCode();
+    }
 }

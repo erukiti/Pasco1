@@ -28,6 +28,7 @@ package org.erukiti.pasco1.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.inject.Inject;
 import org.apache.commons.lang3.tuple.Pair;
+import org.erukiti.pasco1.model.HashID;
 import org.erukiti.pasco1.repository.S3Observable;
 import org.erukiti.pasco1.model.TreeNode;
 import org.erukiti.pasco1.model.User;
@@ -48,7 +49,7 @@ public class FixmeCreateUser {
         this.s3Observable = s3Observable;
     }
 
-    private Observable<Function<String, Observable<String>>> generator(String hashID, String[] pathSplitted) {
+    private Observable<Function<HashID, Observable<HashID>>> generator(HashID hashID, String[] pathSplitted) {
         Observable<Map<String, TreeNode>> stream;
         if (hashID == null)  {
             stream = Observable.just(new HashMap<String, TreeNode>(){});
@@ -57,7 +58,7 @@ public class FixmeCreateUser {
         }
         return stream.flatMap(treeNodeMap -> {
             TreeNode treeNode = treeNodeMap.get(pathSplitted[0]);
-            String nextHashID = null;
+            HashID nextHashID = null;
             if (treeNode != null) {
                 if (pathSplitted.length > 1 && treeNode.type == TreeNode.Type.File) {
                     return Observable.error(new IllegalArgumentException("path is wrong"));
@@ -68,7 +69,7 @@ public class FixmeCreateUser {
                 nextHashID = treeNode.hashId;
             }
             TreeNode.Type type;
-            Observable<Function<String, Observable<String>>> ret;
+            Observable<Function<HashID, Observable<HashID>>> ret;
             if (pathSplitted.length > 1) {
                 type = TreeNode.Type.Dir;
                 ret = generator(nextHashID, Arrays.copyOfRange(pathSplitted, 1, pathSplitted.length));
@@ -77,7 +78,7 @@ public class FixmeCreateUser {
                 ret = Observable.empty();
             }
 
-            Function<String, Observable<String>> function = hashId -> {
+            Function<HashID, Observable<HashID>> function = hashId -> {
                 treeNodeMap.put(pathSplitted[0], new TreeNode(hashId, type));
                 return s3Observable.writeObject("user", treeNodeMap);
             };
@@ -89,16 +90,16 @@ public class FixmeCreateUser {
         String path = user.id.substring(0, 2) + "/" + user.id;
 
         try (Jedis jedis = pool.getResource()) {
-            Observable<Pair<String, String[]>> stream = Observable.just(Pair.of(jedis.get("user"), path.split("/")));
+            Observable<Pair<HashID, String[]>> stream = Observable.just(Pair.of(new HashID(jedis.get("user")), path.split("/")));
 
-            Function<String, Observable<String>> blobWriteFunction = hashID -> s3Observable.writeObject("user", user);
+            Function<HashID, Observable<HashID>> blobWriteFunction = hashID -> s3Observable.writeObject("user", user);
 
-            Observable<Function<String, Observable<String>>> writeStream = Observable.just(blobWriteFunction).mergeWith(stream
+            Observable<Function<HashID, Observable<HashID>>> writeStream = Observable.just(blobWriteFunction).mergeWith(stream
                     .concatMap(pair -> generator(pair.getLeft(), pair.getRight())));
 
             // Won(*3*)chu FixMe!: concatMap と reduce 合わせたみたいな方法があれば、x.apply を toBlocking しなくてすむのに…？
-            writeStream.reduce((String)null, (hashID, x) -> x.apply(hashID).toBlocking().first()).subscribe(hashID -> {
-                jedis.set("user", hashID);
+            writeStream.reduce(new HashID(""), (hashID, x) -> x.apply(hashID).toBlocking().first()).subscribe(hashID -> {
+                jedis.set("user", hashID.getHash());
             }, err -> {
                 err.printStackTrace();
             });

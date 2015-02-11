@@ -32,9 +32,9 @@ public class Meta {
     public String modifiedAuthor;
     public DateTime createdAt;
     public DateTime modifiedAt;
-    public String hashID;
+    public HashID hashID;
     public String[] Tag;
-    public String previous;
+    public HashID previous;
     public String contentType;
 
 }

@@ -33,6 +33,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.inject.Inject;
+import org.erukiti.pasco1.model.HashID;
 import rx.Observable;
 
 import java.io.BufferedReader;
@@ -55,9 +56,9 @@ public class S3Observable {
         this.digest = digest;
     }
 
-    public <T> Observable<T> read(String bucket, String hashID, TypeReference<T> typeReference) {
+    public <T> Observable<T> read(String bucket, HashID hashID, TypeReference<T> typeReference) {
         return Observable.create((Observable.OnSubscribe<T>)subscriber -> {
-            S3Object obj = s3.getObject(bucket, hashID);
+            S3Object obj = s3.getObject(bucket, hashID.getHash());
             BufferedReader br = new BufferedReader(new InputStreamReader(obj.getObjectContent()));
             String text = br.lines().collect(Collectors.joining());
             try {
@@ -70,13 +71,13 @@ public class S3Observable {
         });
     }
 
-    private String getHashID(byte[] bytes) {
+    private HashID getHashID(byte[] bytes) {
         final byte[] hash = digest.digest(bytes);
-        return IntStream.range(0, hash.length).mapToObj(i -> String.format("%02x",hash[i])).collect(Collectors.joining());
+        return new HashID(IntStream.range(0, hash.length).mapToObj(i -> String.format("%02x",hash[i])).collect(Collectors.joining()));
     }
 
     // Won(*3*) Chu FixMe: writeTextを使うように書き換える
-    public <T> Observable<String> writeObject(String bucket, T obj) {
+    public <T> Observable<HashID> writeObject(String bucket, T obj) {
         String json;
         try {
             json = mapper.writeValueAsString(obj);
@@ -84,19 +85,19 @@ public class S3Observable {
             return Observable.error(e);
         }
 
-        String hashID = getHashID(json.getBytes());
+        HashID hashID = getHashID(json.getBytes());
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(json.getBytes().length);
-        PutObjectResult result = s3.putObject(bucket, hashID, new ByteArrayInputStream(json.getBytes()), metadata);
+        PutObjectResult result = s3.putObject(bucket, hashID.getHash(), new ByteArrayInputStream(json.getBytes()), metadata);
 //        System.out.println(result);
         return Observable.just(hashID);
     }
 
-    public Observable<String> writeText(String bucket, String text) {
-        String hashID = getHashID(text.getBytes());
+    public Observable<HashID> writeText(String bucket, String text) {
+        HashID hashID = getHashID(text.getBytes());
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(text.getBytes().length);
-        PutObjectResult result = s3.putObject(bucket, hashID, new ByteArrayInputStream(text.getBytes()), metadata);
+        PutObjectResult result = s3.putObject(bucket, hashID.getHash(), new ByteArrayInputStream(text.getBytes()), metadata);
         return Observable.just(hashID);
     }
 

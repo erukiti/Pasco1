@@ -23,24 +23,19 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.erukiti.pasco1.cli.document;
+package org.erukiti.pasco1.model;
 
-import org.erukiti.pasco1.cli.Command;
-import org.erukiti.pasco1.di.Configure;
-import org.erukiti.pasco1.service.FixmeCreateDocument;
-import org.kohsuke.args4j.Argument;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.SerializerProvider;
 
-public class DocumentCreateCommand implements Command {
-    @Argument(index = 0, required = true)
-    String team;
+import java.io.IOException;
 
-    @Argument(index = 1, required = true)
-    String path;
+public class HashIDSerializer extends JsonSerializer<HashID>{
 
     @Override
-    public void run(Configure configure) {
-        String document = "ほげー¥n";
-
-        configure.getInjector().getInstance(FixmeCreateDocument.class).createDocument(team, path, document);
+    public void serialize(HashID value, JsonGenerator jgen, SerializerProvider provider) throws IOException, JsonProcessingException {
+        jgen.writeString(value.getHash());
     }
 }

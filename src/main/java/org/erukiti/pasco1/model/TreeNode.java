@@ -28,14 +28,14 @@ package org.erukiti.pasco1.model;
 public class TreeNode {
     public enum Type {Dir, File}
 
-    public String hashId;
+    public HashID hashId;
     public Type type;
 
     public TreeNode() {
 
     }
 
-    public TreeNode(String hashId, Type type) {
+    public TreeNode(HashID hashId, Type type) {
         this.hashId = hashId;
         this.type = type;
     }

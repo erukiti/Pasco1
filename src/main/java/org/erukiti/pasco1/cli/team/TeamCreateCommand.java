@@ -28,9 +28,7 @@ package org.erukiti.pasco1.cli.team;
 import org.erukiti.pasco1.cli.Command;
 import org.erukiti.pasco1.di.Configure;
 import org.erukiti.pasco1.service.FixmeCreateTeam;
-import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.Option;
-import org.kohsuke.args4j.spi.StringArrayOptionHandler;
 
 public class TeamCreateCommand implements Command {
     @Option(name="--private")

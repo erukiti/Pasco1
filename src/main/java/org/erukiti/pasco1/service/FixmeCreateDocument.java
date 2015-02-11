@@ -29,6 +29,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.inject.Inject;
 import org.apache.commons.lang3.tuple.Pair;
 import org.erukiti.pasco1.model.Bucket;
+import org.erukiti.pasco1.model.HashID;
 import org.erukiti.pasco1.model.Meta;
 import org.erukiti.pasco1.model.TreeNode;
 import org.erukiti.pasco1.repository.S3Observable;
@@ -49,7 +50,7 @@ public class FixmeCreateDocument {
         this.pool = pool;
     }
 
-    private Observable<Function<String, Observable<String>>> generator(String bucket, String hashID, String[] pathSplitted) {
+    private Observable<Function<HashID, Observable<HashID>>> generator(String bucket, HashID hashID, String[] pathSplitted) {
         Observable<Map<String, TreeNode>> stream;
         if (hashID == null)  {
             stream = Observable.just(new HashMap<String, TreeNode>(){});
@@ -58,7 +59,7 @@ public class FixmeCreateDocument {
         }
         return stream.flatMap(treeNodeMap -> {
             TreeNode treeNode = treeNodeMap.get(pathSplitted[0]);
-            String nextHashID = null;
+            HashID nextHashID = null;
             if (treeNode != null) {
                 if (pathSplitted.length > 1 && treeNode.type == TreeNode.Type.File) {
                     return Observable.error(new IllegalArgumentException("path is wrong"));
@@ -69,7 +70,7 @@ public class FixmeCreateDocument {
                 nextHashID = treeNode.hashId;
             }
             TreeNode.Type type;
-            Observable<Function<String, Observable<String>>> ret;
+            Observable<Function<HashID, Observable<HashID>>> ret;
             if (pathSplitted.length > 1) {
                 type = TreeNode.Type.Dir;
                 ret = generator(bucket, nextHashID, Arrays.copyOfRange(pathSplitted, 1, pathSplitted.length));
@@ -78,7 +79,7 @@ public class FixmeCreateDocument {
                 ret = Observable.empty();
             }
 
-            Function<String, Observable<String>> function = hashId -> {
+            Function<HashID, Observable<HashID>> function = hashId -> {
                 treeNodeMap.put(pathSplitted[0], new TreeNode(hashId, type));
                 return s3Observable.writeObject(bucket, treeNodeMap);
             };
@@ -91,26 +92,27 @@ public class FixmeCreateDocument {
         // Won(*3*) Chu FixMe!: path の正規化
 
         try (Jedis jedis = pool.getResource()) {
-            LinkedList<Function<Pair<String, Observable<Function<String, Observable<String>>>>, Pair<String, Observable<Function<String, Observable<String>>>>>> list = new LinkedList();
+            LinkedList<Function<Pair<HashID, Observable<Function<HashID, Observable<HashID>>>>, Pair<HashID, Observable<Function<HashID, Observable<HashID>>>>>> list = new LinkedList();
             list.add(pair -> {
-                String hashID = jedis.get("bucket-" + team);
-                Observable<Function<String, Observable<String>>> stream = pair.getRight();
+                HashID hashID = new HashID(jedis.get("bucket-" + team));
+                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
 
-                Function<String, Observable<String>> func = hashID2 -> {
-                    jedis.set("bucket-" + team, hashID2);
-                    return Observable.empty();
+                Function<HashID, Observable<HashID>> func = hashID2 -> {
+                    jedis.set("bucket-" + team, hashID2.getHash());
+                    return Observable.just(new HashID("Dummy"));
                 };
-
+                System.out.println("bucket-" + team);
+                System.out.println(hashID);
                 return Pair.of(hashID, Observable.just(func).mergeWith(stream));
             });
 
             list.add(pair -> {
-                String hashID = pair.getLeft();
-                Observable<Function<String, Observable<String>>> stream = pair.getRight();
+                HashID hashID = pair.getLeft();
+                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
 
                 Bucket bucket = s3Observable.read(team, hashID, new TypeReference<Bucket>() {}).toBlocking().first();
 
-                Function<String, Observable<String>> bucketWriteFunction = hashID2 -> {
+                Function<HashID, Observable<HashID>> bucketWriteFunction = hashID2 -> {
                     bucket.previous = bucket.hashID;
                     bucket.hashID = hashID2;
                     return s3Observable.writeObject(team, bucket);
@@ -120,38 +122,37 @@ public class FixmeCreateDocument {
             });
 
             list.add(pair -> {
-                String hashID = pair.getLeft();
-                Observable<Function<String, Observable<String>>> stream = pair.getRight();
+                HashID hashID = pair.getLeft();
+                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
 
-                return Pair.of("", Observable.just(Pair.of(hashID, path.split("/"))).concatMap(pair2 -> generator(team, pair2.getLeft(), pair2.getRight())).mergeWith(stream));
+                return Pair.of(null, Observable.just(Pair.of(hashID, path.split("/"))).concatMap(pair2 -> generator(team, pair2.getLeft(), pair2.getRight())).mergeWith(stream));
             });
 
             list.add(pair -> {
-                Observable<Function<String, Observable<String>>> stream = pair.getRight();
+                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
 
-                Function<String, Observable<String>> metaWriteFunction = hashID -> {
+                Function<HashID, Observable<HashID>> metaWriteFunction = hashID -> {
                     Meta meta = new Meta();
                     meta.hashID = hashID;
                     return s3Observable.writeObject(team, meta);
                 };
 
-                return Pair.of("", Observable.just(metaWriteFunction).mergeWith(stream));
+                return Pair.of(null, Observable.just(metaWriteFunction).mergeWith(stream));
             });
 
             list.add(pair -> {
-                Observable<Function<String, Observable<String>>> stream = pair.getRight();
+                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
 
-                Function<String, Observable<String>> blobWriteFunction = hashID -> s3Observable.writeText(team, text);
+                Function<HashID, Observable<HashID>> blobWriteFunction = hashID -> s3Observable.writeText(team, text);
 
-                return Pair.of("", Observable.just(blobWriteFunction).mergeWith(stream));
+                return Pair.of(null, Observable.just(blobWriteFunction).mergeWith(stream));
             });
 
-            Pair<String, Observable<Function<String, Observable<String>>>> init = Pair.of("", Observable.<Function<String, Observable<String>>>empty());
+            Pair<HashID, Observable<Function<HashID, Observable<HashID>>>> init = Pair.of(null, Observable.<Function<HashID, Observable<HashID>>>empty());
             Observable.from(list).reduce(init, (pair, func) -> func.apply(pair)).subscribe(
                     hoge -> {
-                        System.out.println(hoge.getLeft());
-                        System.out.println(hoge);
-                        hoge.getRight().reduce("", (hashID, x) -> {
+                        hoge.getRight().reduce(new HashID(""), (hashID, x) -> {
+                            System.out.println(hashID);
                             return x.apply(hashID).toBlocking().first();
                         }).subscribe(hashID -> {
                             System.out.println(hashID);
