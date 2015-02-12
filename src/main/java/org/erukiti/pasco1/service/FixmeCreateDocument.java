@@ -32,7 +32,9 @@ import org.erukiti.pasco1.model.Bucket;
 import org.erukiti.pasco1.model.HashID;
 import org.erukiti.pasco1.model.Meta;
 import org.erukiti.pasco1.model.TreeNode;
+import org.erukiti.pasco1.repository.RedisRepository;
 import org.erukiti.pasco1.repository.S3Observable;
+import org.erukiti.pasco1.repository.S3Repository;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import rx.Observable;
@@ -43,11 +45,15 @@ import java.util.*;
 public class FixmeCreateDocument {
     final private S3Observable s3Observable;
     final private JedisPool pool;
+    final private S3Repository s3Repository;
+    final private RedisRepository redisRepository;
 
     @Inject
-    public FixmeCreateDocument(S3Observable s3Observable, JedisPool pool) {
+    public FixmeCreateDocument(S3Repository s3Repository, S3Observable s3Observable, JedisPool pool, RedisRepository redisRepository) {
         this.s3Observable = s3Observable;
         this.pool = pool;
+        this.s3Repository = s3Repository;
+        this.redisRepository = redisRepository;
     }
 
     private Pair<HashID, PublishSubject<HashIDChainFunction<HashID>>> generator(PublishSubject<HashIDChainFunction<HashID>> subscriber, String bucket, HashID hashID, String[] pathSplited) {
@@ -98,56 +104,55 @@ public class FixmeCreateDocument {
             LinkedList<HashIDChainFunction<PublishSubject<HashIDChainFunction<HashID>>>> list = new LinkedList<>();
 
             list.add((prevHashIDRead, subscriber) -> {
-                try {
-                    HashID hashID = new HashID(jedis.get("bucket-" + team));
-                    subscriber.onNext((prevHashIDWrite, obj) -> {
-                        jedis.set("bucket-" + team, prevHashIDWrite.getHash());
-                        return prevHashIDWrite;
-                    });
-                    return hashID;
-                } catch(IllegalArgumentException e) {
-                    subscriber.onError(e);
-                    return null;
-                }
+                return redisRepository.readHashID(jedis, "bucket-" + team).match(
+                        err -> {
+                            subscriber.onError(err);
+                            return null;
+                        }, hashID -> {
+                            subscriber.onNext((prevHashIDWrite, obj) -> {
+                                jedis.set("bucket-" + team, prevHashIDWrite.getHash());
+                                return prevHashIDWrite;
+                            });
+                            return hashID;
+                        }
+                );
             });
 
             list.add((prevHashIDRead, subscriber) -> {
-                try {
-                    Bucket bucket = s3Observable.read(team, prevHashIDRead, new TypeReference<Bucket>() {}).toBlocking().first();
-                    subscriber.onNext((prevHashIDWrite, obj) -> {
-                        bucket.previous = bucket.hashID;
-                        bucket.hashID = prevHashIDWrite;
-                        return s3Observable.writeObject(team, bucket).toBlocking().first();
-                    });
-
-                    return bucket.hashID;
-                } catch (Throwable e) {
-                    subscriber.onError(e);
-                    return null;
-                }
-
+                return s3Repository.readObject(team, prevHashIDRead, new TypeReference<Bucket>(){}).match(
+                        err -> {
+                            subscriber.onError(err);
+                            return null;
+                        }, bucket -> {
+                            subscriber.onNext((prevHashIDWrite, obj) -> {
+                                bucket.previous = bucket.hashID;
+                                bucket.hashID = prevHashIDWrite;
+                                return s3Observable.writeObject(team, bucket).toBlocking().first();
+                            });
+                            return bucket.hashID;
+                        }
+                );
             });
 
             list.add((prevHashIDRead, subscriber) -> generator(subscriber, team, prevHashIDRead, path.split("/")).getLeft());
 
             list.add((prevHashIDRead, subscriber) -> {
-                try {
-                    Meta meta = s3Observable.read(team, prevHashIDRead, new TypeReference<Meta>(){}).toBlocking().first();
+                return s3Repository.readObject(team, prevHashIDRead, new TypeReference<Meta>() {
+                }).match(err -> {
+                    Meta meta = new Meta();
+                    subscriber.onNext((prevHashIDWrite, obj) -> {
+                        meta.hashID = prevHashIDWrite;
+                        return s3Observable.writeObject(team, meta).toBlocking().first();
+                    });
+                    return null;
+                }, meta -> {
                     subscriber.onNext((prevHashIDWrite, obj) -> {
                         meta.previous = meta.hashID;
                         meta.hashID = prevHashIDWrite;
                         return s3Observable.writeObject(team, meta).toBlocking().first();
                     });
-                    return new HashID("Dummy");
-                } catch (Throwable e) {
-                    Meta meta2 = new Meta();
-                    subscriber.onNext((prevHashIDWrite, obj) -> {
-                        meta2.previous = meta2.hashID;
-                        meta2.hashID = prevHashIDWrite;
-                        return s3Observable.writeObject(team, meta2).toBlocking().first();
-                    });
                     return null;
-                }
+                });
             });
 
             list.add((dummyRead, subscriber) -> {
@@ -159,9 +164,10 @@ public class FixmeCreateDocument {
             Observable.from(list).reduce((HashID)null, (prev, func) -> func.chain(prev, subject))
                     .subscribe(dummy -> {
                         subject.onCompleted();
-                        subject.reduce((HashID)null, (prev, func) -> func.chain(prev, null))
-                                .subscribe(dummy2 -> System.out.println("success"), Throwable::printStackTrace);
-            }, Throwable::printStackTrace);
+                        subject.reduce((HashID) null, (prev, func) -> func.chain(prev, null))
+                                .subscribe(dummy2 -> System.out.println("success"),
+                                        Throwable::printStackTrace);
+                    }, Throwable::printStackTrace);
         }
         pool.destroy();
     }

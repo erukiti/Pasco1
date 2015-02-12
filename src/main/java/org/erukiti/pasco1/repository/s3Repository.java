@@ -25,6 +25,56 @@
 
 package org.erukiti.pasco1.repository;
 
-public class s3Repository {
+import com.amazonaws.services.s3.AmazonS3Client;
+import com.amazonaws.services.s3.model.S3Object;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.inject.Inject;
+import org.erukiti.pasco1.common.Either;
+import org.erukiti.pasco1.model.HashID;
+
+import java.io.DataInputStream;
+import java.io.IOException;
+
+public class S3Repository {
+    final private AmazonS3Client s3;
+    final private ObjectMapper mapper;
+
+    @Inject
+    public S3Repository(AmazonS3Client s3, ObjectMapper mapper) {
+        this.s3 = s3;
+        this.mapper = mapper;
+    }
+
+    public Either<Throwable, byte[]> read(String bucket, HashID hashID) {
+        S3Object obj = s3.getObject(bucket, hashID.getHash());
+        byte[] buffer = new byte[(int)obj.getObjectMetadata().getContentLength()];
+        try {
+            new DataInputStream(obj.getObjectContent()).readFully(buffer);
+            return Either.createRight(buffer);
+        } catch (IOException e) {
+            return Either.createLeft(e);
+        }
+    }
+
+    public <T> Either<Throwable, T> readObject(String bucket, HashID hashID, TypeReference<T> typeReference) {
+        Either<Throwable, T> ret = read(bucket, hashID).<Either<Throwable, T>>match(err -> {
+            return Either.createLeft(err);
+        }, bytes -> {
+            try {
+                return Either.createRight(mapper.readValue(bytes, typeReference));
+            } catch (JsonMappingException e) {
+                return Either.createLeft(e);
+            } catch (JsonParseException e) {
+                return Either.createLeft(e);
+            } catch (IOException e) {
+                return Either.createLeft(e);
+            }
+        });
+
+        return ret;
+    }
 
 }
