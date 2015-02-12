@@ -23,46 +23,10 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.erukiti.pasco1.model;
+package org.erukiti.pasco1.service;
 
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import org.erukiti.pasco1.model.HashID;
 
-import java.util.regex.Pattern;
-
-@JsonSerialize(using = HashIDSerializer.class)
-@JsonDeserialize(using = HashIDDeserializer.class)
-public class HashID {
-    private final Pattern pattern = Pattern.compile("[0-9a-fA-F]{64}");
-    private final String hash;
-
-    public HashID(String hash) throws IllegalArgumentException {
-        if (!pattern.matcher(hash).matches()) {
-            throw new IllegalArgumentException(hash);
-        }
-        this.hash = hash.toLowerCase();
-    }
-
-    public String getHash() {
-        return hash;
-    }
-
-    @Override
-    public String toString() {
-        return "@" + hash;
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-        if (!(obj instanceof HashID)) {
-            return false;
-        }
-        HashID that = (HashID)obj;
-        return this.getHash().equals(that.getHash());
-    }
-
-    @Override
-    public int hashCode() {
-        return hash.hashCode();
-    }
+public interface HashIDChainFunction<T> {
+    public HashID chain(HashID hashID, T obj);
 }

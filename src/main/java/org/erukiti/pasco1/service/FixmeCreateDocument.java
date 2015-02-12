@@ -36,9 +36,9 @@ import org.erukiti.pasco1.repository.S3Observable;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import rx.Observable;
+import rx.subjects.PublishSubject;
 
 import java.util.*;
-import java.util.function.Function;
 
 public class FixmeCreateDocument {
     final private S3Observable s3Observable;
@@ -50,120 +50,118 @@ public class FixmeCreateDocument {
         this.pool = pool;
     }
 
-    private Observable<Function<HashID, Observable<HashID>>> generator(String bucket, HashID hashID, String[] pathSplitted) {
-        Observable<Map<String, TreeNode>> stream;
+    private Pair<HashID, PublishSubject<HashIDChainFunction<HashID>>> generator(PublishSubject<HashIDChainFunction<HashID>> subscriber, String bucket, HashID hashID, String[] pathSplited) {
+        HashMap<String, TreeNode> treeNodeMap;
         if (hashID == null)  {
-            stream = Observable.just(new HashMap<String, TreeNode>(){});
+            treeNodeMap = new HashMap<>();
         } else {
-            stream = s3Observable.read(bucket, hashID, new TypeReference<Map<String, TreeNode>>() {});
+            treeNodeMap = s3Observable.read(bucket, hashID, new TypeReference<HashMap<String, TreeNode>>() {}).toBlocking().first();
         }
-        return stream.flatMap(treeNodeMap -> {
-            TreeNode treeNode = treeNodeMap.get(pathSplitted[0]);
-            HashID nextHashID = null;
-            if (treeNode != null) {
-                if (pathSplitted.length > 1 && treeNode.type == TreeNode.Type.File) {
-                    return Observable.error(new IllegalArgumentException("path is wrong"));
-                }
-                if (pathSplitted.length == 1 && treeNode.type == TreeNode.Type.Dir) {
-                    return Observable.error(new IllegalArgumentException("path is wrong"));
-                }
-                nextHashID = treeNode.hashId;
+        TreeNode treeNode = treeNodeMap.get(pathSplited[0]);
+        HashID nextHashID = null;
+        if (treeNode != null) {
+            if (pathSplited.length > 1 && treeNode.type == TreeNode.Type.File) {
+                subscriber.onError(new IllegalArgumentException("path is wrong"));
+                return Pair.of(null, subscriber);
             }
-            TreeNode.Type type;
-            Observable<Function<HashID, Observable<HashID>>> ret;
-            if (pathSplitted.length > 1) {
-                type = TreeNode.Type.Dir;
-                ret = generator(bucket, nextHashID, Arrays.copyOfRange(pathSplitted, 1, pathSplitted.length));
-            } else {
-                type = TreeNode.Type.File;
-                ret = Observable.empty();
+            if (pathSplited.length == 1 && treeNode.type == TreeNode.Type.Dir) {
+                subscriber.onError(new IllegalArgumentException("path is wrong"));
+                return Pair.of(null, subscriber);
             }
+            nextHashID = treeNode.hashId;
+        }
 
-            Function<HashID, Observable<HashID>> function = hashId -> {
-                treeNodeMap.put(pathSplitted[0], new TreeNode(hashId, type));
-                return s3Observable.writeObject(bucket, treeNodeMap);
-            };
-            return ret.mergeWith(Observable.just(function));
+        TreeNode.Type type;
+        if (pathSplited.length > 1) {
+            type = TreeNode.Type.Dir;
+        } else {
+            type = TreeNode.Type.File;
+        }
+
+        subscriber.onNext((prevHashIDRead, obj) -> {
+            treeNodeMap.put(pathSplited[0], new TreeNode(prevHashIDRead, type));
+            return s3Observable.writeObject(bucket, treeNodeMap).toBlocking().first();
         });
+
+        if (pathSplited.length > 1) {
+            return generator(subscriber, bucket, nextHashID, Arrays.copyOfRange(pathSplited, 1, pathSplited.length));
+        } else {
+            return Pair.of(nextHashID, subscriber);
+        }
     }
 
-    // Won(*3*) Chu FixMe!: まじめに書き直す
+    // Won(*3*) Chu FixMe!: もうちょっと簡単な仕組みにできないものか
     public void createDocument(String team, String path, String text) {
         // Won(*3*) Chu FixMe!: path の正規化
 
         try (Jedis jedis = pool.getResource()) {
-            LinkedList<Function<Pair<HashID, Observable<Function<HashID, Observable<HashID>>>>, Pair<HashID, Observable<Function<HashID, Observable<HashID>>>>>> list = new LinkedList();
-            list.add(pair -> {
-                HashID hashID = new HashID(jedis.get("bucket-" + team));
-                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
+            LinkedList<HashIDChainFunction<PublishSubject<HashIDChainFunction<HashID>>>> list = new LinkedList<>();
 
-                Function<HashID, Observable<HashID>> func = hashID2 -> {
-                    jedis.set("bucket-" + team, hashID2.getHash());
-                    return Observable.just(new HashID("Dummy"));
-                };
-                System.out.println("bucket-" + team);
-                System.out.println(hashID);
-                return Pair.of(hashID, Observable.just(func).mergeWith(stream));
+            list.add((prevHashIDRead, subscriber) -> {
+                try {
+                    HashID hashID = new HashID(jedis.get("bucket-" + team));
+                    subscriber.onNext((prevHashIDWrite, obj) -> {
+                        jedis.set("bucket-" + team, prevHashIDWrite.getHash());
+                        return prevHashIDWrite;
+                    });
+                    return hashID;
+                } catch(IllegalArgumentException e) {
+                    subscriber.onError(e);
+                    return null;
+                }
             });
 
-            list.add(pair -> {
-                HashID hashID = pair.getLeft();
-                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
+            list.add((prevHashIDRead, subscriber) -> {
+                try {
+                    Bucket bucket = s3Observable.read(team, prevHashIDRead, new TypeReference<Bucket>() {}).toBlocking().first();
+                    subscriber.onNext((prevHashIDWrite, obj) -> {
+                        bucket.previous = bucket.hashID;
+                        bucket.hashID = prevHashIDWrite;
+                        return s3Observable.writeObject(team, bucket).toBlocking().first();
+                    });
 
-                Bucket bucket = s3Observable.read(team, hashID, new TypeReference<Bucket>() {}).toBlocking().first();
+                    return bucket.hashID;
+                } catch (Throwable e) {
+                    subscriber.onError(e);
+                    return null;
+                }
 
-                Function<HashID, Observable<HashID>> bucketWriteFunction = hashID2 -> {
-                    bucket.previous = bucket.hashID;
-                    bucket.hashID = hashID2;
-                    return s3Observable.writeObject(team, bucket);
-                };
-
-                return Pair.of(bucket.hashID, Observable.just(bucketWriteFunction).mergeWith(stream));
             });
 
-            list.add(pair -> {
-                HashID hashID = pair.getLeft();
-                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
+            list.add((prevHashIDRead, subscriber) -> generator(subscriber, team, prevHashIDRead, path.split("/")).getLeft());
 
-                return Pair.of(null, Observable.just(Pair.of(hashID, path.split("/"))).concatMap(pair2 -> generator(team, pair2.getLeft(), pair2.getRight())).mergeWith(stream));
+            list.add((prevHashIDRead, subscriber) -> {
+                try {
+                    Meta meta = s3Observable.read(team, prevHashIDRead, new TypeReference<Meta>(){}).toBlocking().first();
+                    subscriber.onNext((prevHashIDWrite, obj) -> {
+                        meta.previous = meta.hashID;
+                        meta.hashID = prevHashIDWrite;
+                        return s3Observable.writeObject(team, meta).toBlocking().first();
+                    });
+                    return new HashID("Dummy");
+                } catch (Throwable e) {
+                    Meta meta2 = new Meta();
+                    subscriber.onNext((prevHashIDWrite, obj) -> {
+                        meta2.previous = meta2.hashID;
+                        meta2.hashID = prevHashIDWrite;
+                        return s3Observable.writeObject(team, meta2).toBlocking().first();
+                    });
+                    return null;
+                }
             });
 
-            list.add(pair -> {
-                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
-
-                Function<HashID, Observable<HashID>> metaWriteFunction = hashID -> {
-                    Meta meta = new Meta();
-                    meta.hashID = hashID;
-                    return s3Observable.writeObject(team, meta);
-                };
-
-                return Pair.of(null, Observable.just(metaWriteFunction).mergeWith(stream));
+            list.add((dummyRead, subscriber) -> {
+                subscriber.onNext((dummyWrite, obj) -> s3Observable.writeText(team, text).toBlocking().first());
+                return null;
             });
 
-            list.add(pair -> {
-                Observable<Function<HashID, Observable<HashID>>> stream = pair.getRight();
-
-                Function<HashID, Observable<HashID>> blobWriteFunction = hashID -> s3Observable.writeText(team, text);
-
-                return Pair.of(null, Observable.just(blobWriteFunction).mergeWith(stream));
-            });
-
-            Pair<HashID, Observable<Function<HashID, Observable<HashID>>>> init = Pair.of(null, Observable.<Function<HashID, Observable<HashID>>>empty());
-            Observable.from(list).reduce(init, (pair, func) -> func.apply(pair)).subscribe(
-                    hoge -> {
-                        hoge.getRight().reduce(new HashID(""), (hashID, x) -> {
-                            System.out.println(hashID);
-                            return x.apply(hashID).toBlocking().first();
-                        }).subscribe(hashID -> {
-                            System.out.println(hashID);
-                        }, err -> {
-                            err.printStackTrace();
-                        });
-                    },
-                    err -> {
-                        err.printStackTrace();
-                    }
-            );
+            PublishSubject<HashIDChainFunction<HashID>> subject = PublishSubject.create();
+            Observable.from(list).reduce((HashID)null, (prev, func) -> func.chain(prev, subject))
+                    .subscribe(dummy -> {
+                        subject.onCompleted();
+                        subject.reduce((HashID)null, (prev, func) -> func.chain(prev, null))
+                                .subscribe(dummy2 -> System.out.println("success"), Throwable::printStackTrace);
+            }, Throwable::printStackTrace);
         }
         pool.destroy();
     }
