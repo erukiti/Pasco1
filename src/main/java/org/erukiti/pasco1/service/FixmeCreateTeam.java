@@ -27,17 +27,21 @@ package org.erukiti.pasco1.service;
 
 import com.google.inject.Inject;
 import org.erukiti.pasco1.model.Bucket;
+import org.erukiti.pasco1.repository.RedisRepository;
 import org.erukiti.pasco1.repository.S3Observable;
+import org.erukiti.pasco1.repository.S3Repository;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 
 public class FixmeCreateTeam {
-    final private S3Observable s3Observable;
+    final private S3Repository s3Repository;
+    final private RedisRepository redisRepository;
     final private JedisPool pool;
 
     @Inject
-    public FixmeCreateTeam(S3Observable s3Observable, JedisPool pool) {
-        this.s3Observable = s3Observable;
+    public FixmeCreateTeam(S3Observable s3Observable, S3Repository s3Repository, RedisRepository redisRepository, JedisPool pool) {
+        this.s3Repository = s3Repository;
+        this.redisRepository = redisRepository;
         this.pool = pool;
     }
 
@@ -45,10 +49,16 @@ public class FixmeCreateTeam {
         // Won(*3*) Chu FixMe: id の validation
 
         try (Jedis jedis = pool.getResource()) {
-            s3Observable.createBucket(id);
+            s3Repository.createBucket(id);
             Bucket bucket = new Bucket(name, isPrivate, admin);
-            s3Observable.writeObject(id, bucket).subscribe(hashID -> {
-                jedis.set("bucket-" + id, hashID.getHash());
+            s3Repository.writeObject(id, bucket).match(err -> {
+                err.printStackTrace();
+                return null;
+            }, hashID -> {
+                redisRepository.writeHashID(jedis, "bucket-" + id, hashID).ifPresent(err -> {
+                    err.printStackTrace();
+                });
+                return null;
             });
         }
         pool.destroy();

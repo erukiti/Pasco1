@@ -86,6 +86,7 @@ public class FixmeCreateUser {
         });
     }
 
+    // Won(*3*) Chu FixMe!: CreateDocument と処理の共通化できる部分を共通化する
     public void create(User user) {
         String path = user.id.substring(0, 2) + "/" + user.id;
 
@@ -97,7 +98,6 @@ public class FixmeCreateUser {
             Observable<Function<HashID, Observable<HashID>>> writeStream = Observable.just(blobWriteFunction).mergeWith(stream
                     .concatMap(pair -> generator(pair.getLeft(), pair.getRight())));
 
-            // Won(*3*)chu FixMe!: concatMap と reduce 合わせたみたいな方法があれば、x.apply を toBlocking しなくてすむのに…？
             writeStream.reduce(new HashID(""), (hashID, x) -> x.apply(hashID).toBlocking().first()).subscribe(hashID -> {
                 jedis.set("user", hashID.getHash());
             }, err -> {

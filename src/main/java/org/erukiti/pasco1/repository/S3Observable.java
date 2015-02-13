@@ -56,6 +56,8 @@ public class S3Observable {
         this.digest = digest;
     }
 
+    // Won(*3*) Chu FixMe!: 廃止
+    @Deprecated
     public <T> Observable<T> read(String bucket, HashID hashID, TypeReference<T> typeReference) {
         return Observable.create((Observable.OnSubscribe<T>)subscriber -> {
             S3Object obj = s3.getObject(bucket, hashID.getHash());
@@ -76,7 +78,8 @@ public class S3Observable {
         return new HashID(IntStream.range(0, hash.length).mapToObj(i -> String.format("%02x",hash[i])).collect(Collectors.joining()));
     }
 
-    // Won(*3*) Chu FixMe: writeTextを使うように書き換える
+    // Won(*3*) Chu FixMe!: 廃止
+    @Deprecated
     public <T> Observable<HashID> writeObject(String bucket, T obj) {
         String json;
         try {
@@ -89,19 +92,7 @@ public class S3Observable {
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(json.getBytes().length);
         PutObjectResult result = s3.putObject(bucket, hashID.getHash(), new ByteArrayInputStream(json.getBytes()), metadata);
-//        System.out.println(result);
         return Observable.just(hashID);
     }
 
-    public Observable<HashID> writeText(String bucket, String text) {
-        HashID hashID = getHashID(text.getBytes());
-        ObjectMetadata metadata = new ObjectMetadata();
-        metadata.setContentLength(text.getBytes().length);
-        PutObjectResult result = s3.putObject(bucket, hashID.getHash(), new ByteArrayInputStream(text.getBytes()), metadata);
-        return Observable.just(hashID);
-    }
-
-    public void createBucket(String name) {
-        s3.createBucket(name);
-    }
 }

@@ -26,8 +26,11 @@
 package org.erukiti.pasco1.repository;
 
 import com.amazonaws.services.s3.AmazonS3Client;
+import com.amazonaws.services.s3.model.ObjectMetadata;
+import com.amazonaws.services.s3.model.PutObjectResult;
 import com.amazonaws.services.s3.model.S3Object;
 import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,20 +38,29 @@ import com.google.inject.Inject;
 import org.erukiti.pasco1.common.Either;
 import org.erukiti.pasco1.model.HashID;
 
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.security.MessageDigest;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class S3Repository {
     final private AmazonS3Client s3;
     final private ObjectMapper mapper;
+    final private MessageDigest digest;
 
     @Inject
-    public S3Repository(AmazonS3Client s3, ObjectMapper mapper) {
+    public S3Repository(AmazonS3Client s3, ObjectMapper mapper, MessageDigest digest) {
         this.s3 = s3;
         this.mapper = mapper;
+        this.digest = digest;
     }
 
     public Either<Throwable, byte[]> read(String bucket, HashID hashID) {
+        if (hashID == null) {
+            return Either.createLeft(new NullPointerException());
+        }
         S3Object obj = s3.getObject(bucket, hashID.getHash());
         byte[] buffer = new byte[(int)obj.getObjectMetadata().getContentLength()];
         try {
@@ -77,4 +89,31 @@ public class S3Repository {
         return ret;
     }
 
+    private HashID getHashID(byte[] bytes) {
+        final byte[] hash = digest.digest(bytes);
+        return new HashID(IntStream.range(0, hash.length).mapToObj(i -> String.format("%02x",hash[i])).collect(Collectors.joining()));
+    }
+
+    public Either<Throwable, HashID> write(String bucket, byte[] data) {
+        HashID hashID = getHashID(data);
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(data.length);
+        PutObjectResult result = s3.putObject(bucket, hashID.getHash(), new ByteArrayInputStream(data), metadata);
+        // Won(*3*) Chu FixMe!: 成否判定
+        return Either.createRight(hashID);
+    }
+
+    public <T> Either<Throwable, HashID> writeObject(String bucket, T obj) {
+        String json;
+        try {
+            json = mapper.writeValueAsString(obj);
+        } catch (JsonProcessingException e) {
+            return Either.createLeft(e);
+        }
+        return write(bucket, json.getBytes());
+    }
+
+    public void createBucket(String name) {
+        s3.createBucket(name);
+    }
 }

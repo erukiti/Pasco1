@@ -28,12 +28,12 @@ package org.erukiti.pasco1.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.inject.Inject;
 import org.apache.commons.lang3.tuple.Pair;
+import org.erukiti.pasco1.common.Either;
 import org.erukiti.pasco1.model.Bucket;
 import org.erukiti.pasco1.model.HashID;
 import org.erukiti.pasco1.model.Meta;
 import org.erukiti.pasco1.model.TreeNode;
 import org.erukiti.pasco1.repository.RedisRepository;
-import org.erukiti.pasco1.repository.S3Observable;
 import org.erukiti.pasco1.repository.S3Repository;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
@@ -43,25 +43,29 @@ import rx.subjects.PublishSubject;
 import java.util.*;
 
 public class FixmeCreateDocument {
-    final private S3Observable s3Observable;
     final private JedisPool pool;
     final private S3Repository s3Repository;
     final private RedisRepository redisRepository;
 
     @Inject
-    public FixmeCreateDocument(S3Repository s3Repository, S3Observable s3Observable, JedisPool pool, RedisRepository redisRepository) {
-        this.s3Observable = s3Observable;
+    public FixmeCreateDocument(S3Repository s3Repository, JedisPool pool, RedisRepository redisRepository) {
         this.pool = pool;
         this.s3Repository = s3Repository;
         this.redisRepository = redisRepository;
     }
 
-    private Pair<HashID, PublishSubject<HashIDChainFunction<HashID>>> generator(PublishSubject<HashIDChainFunction<HashID>> subscriber, String bucket, HashID hashID, String[] pathSplited) {
-        HashMap<String, TreeNode> treeNodeMap;
+    private Pair<HashID, PublishSubject<HashIDChainFunction<HashID>>> dirGenerator(PublishSubject<HashIDChainFunction<HashID>> subscriber, String bucket, HashID hashID, String[] pathSplited) {
+        final HashMap<String, TreeNode> treeNodeMap;
         if (hashID == null)  {
             treeNodeMap = new HashMap<>();
         } else {
-            treeNodeMap = s3Observable.read(bucket, hashID, new TypeReference<HashMap<String, TreeNode>>() {}).toBlocking().first();
+            Either<Throwable, HashMap<String, TreeNode>> result = s3Repository.readObject(bucket, hashID, new TypeReference<HashMap<String, TreeNode>>() {});
+            if (result.getLeft().isPresent()) {
+                subscriber.onError(result.getLeft().get());
+                return Pair.of(null, subscriber);
+            } else {
+                treeNodeMap = result.getRight().get();
+            }
         }
         TreeNode treeNode = treeNodeMap.get(pathSplited[0]);
         HashID nextHashID = null;
@@ -86,11 +90,15 @@ public class FixmeCreateDocument {
 
         subscriber.onNext((prevHashIDRead, obj) -> {
             treeNodeMap.put(pathSplited[0], new TreeNode(prevHashIDRead, type));
-            return s3Observable.writeObject(bucket, treeNodeMap).toBlocking().first();
+            return s3Repository.writeObject(bucket, treeNodeMap).match(err -> {
+                return null;
+            }, nextHashIDWrite -> {
+                return nextHashIDWrite;
+            });
         });
 
         if (pathSplited.length > 1) {
-            return generator(subscriber, bucket, nextHashID, Arrays.copyOfRange(pathSplited, 1, pathSplited.length));
+            return dirGenerator(subscriber, bucket, nextHashID, Arrays.copyOfRange(pathSplited, 1, pathSplited.length));
         } else {
             return Pair.of(nextHashID, subscriber);
         }
@@ -110,7 +118,7 @@ public class FixmeCreateDocument {
                             return null;
                         }, hashID -> {
                             subscriber.onNext((prevHashIDWrite, obj) -> {
-                                jedis.set("bucket-" + team, prevHashIDWrite.getHash());
+                                redisRepository.writeHashID(jedis, "bucket-" + team, prevHashIDWrite);
                                 return prevHashIDWrite;
                             });
                             return hashID;
@@ -127,14 +135,19 @@ public class FixmeCreateDocument {
                             subscriber.onNext((prevHashIDWrite, obj) -> {
                                 bucket.previous = bucket.hashID;
                                 bucket.hashID = prevHashIDWrite;
-                                return s3Observable.writeObject(team, bucket).toBlocking().first();
+
+                                return s3Repository.writeObject(team, bucket).match(err -> {
+                                    return null;
+                                }, nextHashIDWrite -> {
+                                    return nextHashIDWrite;
+                                });
                             });
                             return bucket.hashID;
                         }
                 );
             });
 
-            list.add((prevHashIDRead, subscriber) -> generator(subscriber, team, prevHashIDRead, path.split("/")).getLeft());
+            list.add((prevHashIDRead, subscriber) -> dirGenerator(subscriber, team, prevHashIDRead, path.split("/")).getLeft());
 
             list.add((prevHashIDRead, subscriber) -> {
                 return s3Repository.readObject(team, prevHashIDRead, new TypeReference<Meta>() {
@@ -142,21 +155,33 @@ public class FixmeCreateDocument {
                     Meta meta = new Meta();
                     subscriber.onNext((prevHashIDWrite, obj) -> {
                         meta.hashID = prevHashIDWrite;
-                        return s3Observable.writeObject(team, meta).toBlocking().first();
+                        return s3Repository.writeObject(team, meta).match(err2 -> {
+                            return null;
+                        }, nextHashIDWrite -> {
+                            return nextHashIDWrite;
+                        });
                     });
                     return null;
                 }, meta -> {
                     subscriber.onNext((prevHashIDWrite, obj) -> {
                         meta.previous = meta.hashID;
                         meta.hashID = prevHashIDWrite;
-                        return s3Observable.writeObject(team, meta).toBlocking().first();
+                        return s3Repository.writeObject(team, meta).match(err2 -> {
+                            return null;
+                        }, nextHashIDWrite -> {
+                            return nextHashIDWrite;
+                        });
                     });
                     return null;
                 });
             });
 
             list.add((dummyRead, subscriber) -> {
-                subscriber.onNext((dummyWrite, obj) -> s3Observable.writeText(team, text).toBlocking().first());
+                subscriber.onNext((dummyWrite, obj) -> s3Repository.write(team, text.getBytes()).match(err -> {
+                    return null;
+                }, nextHashWrite -> {
+                    return nextHashWrite;
+                }));
                 return null;
             });
 

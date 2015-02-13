@@ -30,6 +30,8 @@ import org.erukiti.pasco1.common.Either;
 import org.erukiti.pasco1.model.HashID;
 import redis.clients.jedis.Jedis;
 
+import java.util.Optional;
+
 public class RedisRepository {
 
     @Inject
@@ -46,5 +48,11 @@ public class RedisRepository {
         } catch (IllegalArgumentException e) {
             return Either.createLeft(e);
         }
+    }
+
+    public Optional<Throwable> writeHashID(Jedis jedis, String key, HashID hashID) {
+        jedis.set(key, hashID.getHash());
+        // Won(*3*) Chu FixMe!: 成否判定
+        return Optional.empty();
     }
 }
