@@ -15,5 +15,6 @@ dependencies {
     compile 'org.apache.commons:commons-lang3:3.3.2'
 
 
+    testCompile 'com.googlecode.jmockit:jmockit:1.7'
     testCompile "junit:junit:4.11"
 }

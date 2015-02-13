@@ -46,7 +46,7 @@ public class FixmeCreateTeam {
     }
 
     public void createTeam(String id, String name, boolean isPrivate, String[] admin) {
-        // Won(*3*) Chu FixMe: id の validation
+        // Won(*3*)Chu FixMe: id の validation
 
         try (Jedis jedis = pool.getResource()) {
             s3Repository.createBucket(id);

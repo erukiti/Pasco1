@@ -86,7 +86,7 @@ public class FixmeCreateUser {
         });
     }
 
-    // Won(*3*) Chu FixMe!: CreateDocument と処理の共通化できる部分を共通化する
+    // Won(*3*)Chu FixMe!: CreateDocument と処理の共通化できる部分を共通化する
     public void create(User user) {
         String path = user.id.substring(0, 2) + "/" + user.id;
 

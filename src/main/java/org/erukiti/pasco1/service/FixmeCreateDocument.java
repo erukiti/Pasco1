@@ -111,7 +111,6 @@ public class FixmeCreateDocument {
         };
     }
 
-
     public Observable<HashIDChainFunction<ReplaySubject<HashID>>> readAndGenerateWriters(List<HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>>> readerList) {
         ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>> subject = ReplaySubject.create();
         Observable.from(readerList).reduce((HashID) null, (prev, func) -> func.chain(prev, subject)).toBlocking().first();
@@ -122,46 +121,43 @@ public class FixmeCreateDocument {
         return Observable.from(writerList);
     }
 
-    public void write(Observable<HashIDChainFunction<ReplaySubject<HashID>>> writerStream) {
+    public Either<Throwable, HashID> write(Observable<HashIDChainFunction<ReplaySubject<HashID>>> writerStream) {
         ReplaySubject<HashID> subject = ReplaySubject.create();
-        writerStream.reduce((HashID) null, (prev, func) -> func.chain(prev, subject));
+        writerStream.reduce((HashID) null, (prev, func) -> func.chain(prev, subject)).toBlocking().first();
         subject.onCompleted();
 
-        subject.subscribe(hashID -> {
-            System.out.println(hashID);
-        }, err -> {
-            err.printStackTrace();
-        }, () -> {
-            System.out.println("compl.");
-        });
-
-//        return subject.flatMap(hashID -> Observable.just(Either.<Throwable, HashID>createRight(hashID))).onErrorReturn(Either::<Throwable, HashID>createLeft).toBlocking().first();
+        return subject.concatMap(hashID -> Observable.just(Either.<Throwable, HashID>createRight(hashID))).onErrorReturn(Either::<Throwable, HashID>createLeft).toBlocking().first();
     }
 
-    // Won(*3*) Chu FixMe!: もうちょっと簡単な仕組みにできないものか
     public void createDocument(String team, String path, String text) {
-        // Won(*3*) Chu FixMe!: path の正規化
+        // Won(*3*)Chu FixMe!: path の正規化
 
         try (Jedis jedis = pool.getResource()) {
             LinkedList<HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>>> list = new LinkedList<>();
 
-            list.add(redisReader(team, jedis));
-            list.add(bucketReader(team));
-            list.add(dirReader(team, path));
-            list.add(metaReader(team));
-            list.add(blobReader(team, text));
+            list.add(redisReadAndWriterGenerator(team, jedis));
+            list.add(bucketReadAndWriterGenerator(team));
+            list.add(dirReadAndWriterGenerator(team, path));
+            list.add(metaReadAndWriterGenerator(team));
+            list.add(blobReadAndWriterGenerator(team, text));
 
             Observable<HashIDChainFunction<ReplaySubject<HashID>>> writerStream = readAndGenerateWriters(list);
-            write(writerStream);
+            write(writerStream).match(err -> {
+                err.printStackTrace();
+                return null;
+            }, hashID -> {
+                System.out.println("done: " + hashID.toString());
+                return null;
+            });
         }
         pool.destroy();
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> dirReader(String team, String path) {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> dirReadAndWriterGenerator(String team, String path) {
         return (prevHashID, subject) -> dirGenerator(subject, team, prevHashID, path.split("/")).getLeft();
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> blobReader(String team, String text) {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> blobReadAndWriterGenerator(String team, String text) {
         return (prevHashID, subject) -> {
             subject.onNext(blobWriter(team, text));
             return prevHashID;
@@ -178,25 +174,26 @@ public class FixmeCreateDocument {
         });
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> metaReader(String team) {
-        return (prevHashIDRead, subscriber) -> {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> metaReadAndWriterGenerator(String team) {
+        return (prevHashIDRead, subject) -> {
             return s3Repository.readObject(team, prevHashIDRead, new TypeReference<Meta>() {
             }).match(err -> {
                 Meta meta = new Meta();
-                subscriber.onNext(metaWriter(team, meta));
+                subject.onNext(metaWriter(team, meta));
                 return prevHashIDRead;
             }, meta -> {
                 meta.previous = meta.hashID;
-                subscriber.onNext(metaWriter(team, meta));
+                subject.onNext(metaWriter(team, meta));
                 return prevHashIDRead;
             });
         };
     }
 
     public HashIDChainFunction<ReplaySubject<HashID>> metaWriter(String team, Meta meta) {
-        return (prevHashIDWrite, obj) -> {
+        return (prevHashIDWrite, subject) -> {
             meta.hashID = prevHashIDWrite;
-            return s3Repository.writeObject(team, meta).match(err2 -> {
+            return s3Repository.writeObject(team, meta).match(err -> {
+                subject.onError(err);
                 return null;
             }, nextHashIDWrite -> {
                 return nextHashIDWrite;
@@ -204,14 +201,14 @@ public class FixmeCreateDocument {
         };
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> bucketReader(String team) {
-        return (prevHashIDRead, subscriber) -> {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> bucketReadAndWriterGenerator(String team) {
+        return (prevHashIDRead, subject) -> {
             return s3Repository.readObject(team, prevHashIDRead, new TypeReference<Bucket>(){}).match(
                     err -> {
-                        subscriber.onError(err);
+                        subject.onError(err);
                         return null;
                     }, bucket -> {
-                        subscriber.onNext(bucketWriter(team, bucket));
+                        subject.onNext(bucketWriter(team, bucket));
                         return bucket.hashID;
                     }
             );
@@ -231,14 +228,14 @@ public class FixmeCreateDocument {
         };
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> redisReader(String team, Jedis jedis) {
-        return (prevHashIDRead, subscriber) -> {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> redisReadAndWriterGenerator(String team, Jedis jedis) {
+        return (prevHashIDRead, subject) -> {
             return redisRepository.readHashID(jedis, "bucket-" + team).match(
                     err -> {
-                        subscriber.onError(err);
+                        subject.onError(err);
                         return null;
                     }, hashID -> {
-                        subscriber.onNext(redisWriter(team, jedis));
+                        subject.onNext(redisWriter(team, jedis));
                         return hashID;
                     }
             );

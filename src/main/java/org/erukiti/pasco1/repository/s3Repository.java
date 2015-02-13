@@ -99,7 +99,7 @@ public class S3Repository {
         ObjectMetadata metadata = new ObjectMetadata();
         metadata.setContentLength(data.length);
         PutObjectResult result = s3.putObject(bucket, hashID.getHash(), new ByteArrayInputStream(data), metadata);
-        // Won(*3*) Chu FixMe!: 成否判定
+        // Won(*3*)Chu FixMe!: 成否判定
         return Either.createRight(hashID);
     }
 

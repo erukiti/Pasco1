@@ -52,7 +52,7 @@ public class RedisRepository {
 
     public Optional<Throwable> writeHashID(Jedis jedis, String key, HashID hashID) {
         jedis.set(key, hashID.getHash());
-        // Won(*3*) Chu FixMe!: 成否判定
+        // Won(*3*)Chu FixMe!: 成否判定
         return Optional.empty();
     }
 }

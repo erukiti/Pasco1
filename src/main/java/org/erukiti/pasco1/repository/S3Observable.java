@@ -56,7 +56,7 @@ public class S3Observable {
         this.digest = digest;
     }
 
-    // Won(*3*) Chu FixMe!: 廃止
+    // Won(*3*)Chu FixMe!: 廃止
     @Deprecated
     public <T> Observable<T> read(String bucket, HashID hashID, TypeReference<T> typeReference) {
         return Observable.create((Observable.OnSubscribe<T>)subscriber -> {
@@ -78,7 +78,7 @@ public class S3Observable {
         return new HashID(IntStream.range(0, hash.length).mapToObj(i -> String.format("%02x",hash[i])).collect(Collectors.joining()));
     }
 
-    // Won(*3*) Chu FixMe!: 廃止
+    // Won(*3*)Chu FixMe!: 廃止
     @Deprecated
     public <T> Observable<HashID> writeObject(String bucket, T obj) {
         String json;
