@@ -35,7 +35,7 @@ import java.util.List;
 
 import static org.junit.Assert.*;
 
-public class FixmeCreateDocumentTest {
+public class ReadAndWriterGeneratorTest {
     private HashID hashID0 = new HashID("0000000000000000000000000000000000000000000000000000000000000000");
     private HashID hashID1 = new HashID("0000000000000000000000000000000000000000000000000000000000000001");
     private HashID hashID2 = new HashID("0000000000000000000000000000000000000000000000000000000000000002");
@@ -73,8 +73,8 @@ public class FixmeCreateDocumentTest {
             subject.onNext(writeFunc2());
             return hashID6;
         });
-        FixmeCreateDocument fixmeCreateDocument = new FixmeCreateDocument(null, null, null);
-        List<HashIDChainFunction<ReplaySubject<HashID>>> funcList = fixmeCreateDocument.readAndGenerateWriters(list).toList().toBlocking().first();
+        ReadAndWriterGenerator readAndWriterGenerator = new ReadAndWriterGenerator(null, null);
+        List<HashIDChainFunction<ReplaySubject<HashID>>> funcList = readAndWriterGenerator.readAndWriterGenerate(list).toList().toBlocking().first();
         assertEquals(funcList.size(), 2);
         ReplaySubject<HashID> sub = ReplaySubject.create();
         assertEquals(funcList.get(0).chain(hashID3, sub), hashID5);
@@ -96,8 +96,8 @@ public class FixmeCreateDocumentTest {
             subject.onError(throwable0);
             return hashID6;
         });
-        FixmeCreateDocument fixmeCreateDocument = new FixmeCreateDocument(null, null, null);
-        List<HashIDChainFunction<ReplaySubject<HashID>>> funcList = fixmeCreateDocument.readAndGenerateWriters(list).toList().toBlocking().first();
+        ReadAndWriterGenerator readAndWriterGenerator = new ReadAndWriterGenerator(null, null);
+        List<HashIDChainFunction<ReplaySubject<HashID>>> funcList = readAndWriterGenerator.readAndWriterGenerate(list).toList().toBlocking().first();
         assertEquals(funcList.size(), 2);
         ReplaySubject<HashID> sub = ReplaySubject.create();
         assertNull(funcList.get(0).chain(hashID3, sub));

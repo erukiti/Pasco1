@@ -25,16 +25,8 @@
 
 package org.erukiti.pasco1.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.inject.Inject;
-import org.apache.commons.lang3.tuple.Pair;
-import org.erukiti.pasco1.common.Either;
-import org.erukiti.pasco1.model.Bucket;
 import org.erukiti.pasco1.model.HashID;
-import org.erukiti.pasco1.model.Meta;
-import org.erukiti.pasco1.model.TreeNode;
-import org.erukiti.pasco1.repository.RedisRepository;
-import org.erukiti.pasco1.repository.S3Repository;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import rx.Observable;
@@ -44,89 +36,12 @@ import java.util.*;
 
 public class FixmeCreateDocument {
     final private JedisPool pool;
-    final private S3Repository s3Repository;
-    final private RedisRepository redisRepository;
+    final private ReadAndWriterGenerator readAndWriterGenerator;
 
     @Inject
-    public FixmeCreateDocument(S3Repository s3Repository, JedisPool pool, RedisRepository redisRepository) {
+    public FixmeCreateDocument(JedisPool pool, ReadAndWriterGenerator readAndWriterGenerator) {
         this.pool = pool;
-        this.s3Repository = s3Repository;
-        this.redisRepository = redisRepository;
-    }
-
-    private Pair<HashID, ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> dirGenerator(ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>> subscriber, String bucket, HashID hashID, String[] pathSplited) {
-        final HashMap<String, TreeNode> treeNodeMap;
-        if (hashID == null)  {
-            treeNodeMap = new HashMap<>();
-        } else {
-            Either<Throwable, HashMap<String, TreeNode>> result = s3Repository.readObject(bucket, hashID, new TypeReference<HashMap<String, TreeNode>>() {});
-            if (result.getLeft().isPresent()) {
-                subscriber.onError(result.getLeft().get());
-                return Pair.of(null, subscriber);
-            } else {
-                treeNodeMap = result.getRight().get();
-            }
-        }
-        TreeNode treeNode = treeNodeMap.get(pathSplited[0]);
-        HashID nextHashID = null;
-        if (treeNode != null) {
-            if (pathSplited.length > 1 && treeNode.type == TreeNode.Type.File) {
-                subscriber.onError(new IllegalArgumentException("path is wrong"));
-                return Pair.of(null, subscriber);
-            }
-            if (pathSplited.length == 1 && treeNode.type == TreeNode.Type.Dir) {
-                subscriber.onError(new IllegalArgumentException("path is wrong"));
-                return Pair.of(null, subscriber);
-            }
-            nextHashID = treeNode.hashId;
-        }
-
-        TreeNode.Type type;
-        if (pathSplited.length > 1) {
-            type = TreeNode.Type.Dir;
-        } else {
-            type = TreeNode.Type.File;
-        }
-
-        subscriber.onNext((prevHashIDRead, obj) -> {
-            treeNodeMap.put(pathSplited[0], new TreeNode(prevHashIDRead, type));
-            return s3Repository.writeObject(bucket, treeNodeMap).match(err -> {
-                return null;
-            }, nextHashIDWrite -> {
-                return nextHashIDWrite;
-            });
-        });
-
-        if (pathSplited.length > 1) {
-            return dirGenerator(subscriber, bucket, nextHashID, Arrays.copyOfRange(pathSplited, 1, pathSplited.length));
-        } else {
-            return Pair.of(nextHashID, subscriber);
-        }
-    }
-
-    public HashIDChainFunction<ReplaySubject<HashID>> errorWriter(Throwable err) {
-        return (prevHashID, subject) -> {
-            subject.onError(err);
-            return null;
-        };
-    }
-
-    public Observable<HashIDChainFunction<ReplaySubject<HashID>>> readAndGenerateWriters(List<HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>>> readerList) {
-        ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>> subject = ReplaySubject.create();
-        Observable.from(readerList).reduce((HashID) null, (prev, func) -> func.chain(prev, subject)).toBlocking().first();
-        subject.onCompleted();
-
-        List<HashIDChainFunction<ReplaySubject<HashID>>> writerList = subject.onErrorReturn(e -> errorWriter(e)).toList().toBlocking().first();
-        Collections.reverse(writerList);
-        return Observable.from(writerList);
-    }
-
-    public Either<Throwable, HashID> write(Observable<HashIDChainFunction<ReplaySubject<HashID>>> writerStream) {
-        ReplaySubject<HashID> subject = ReplaySubject.create();
-        writerStream.reduce((HashID) null, (prev, func) -> func.chain(prev, subject)).toBlocking().first();
-        subject.onCompleted();
-
-        return subject.concatMap(hashID -> Observable.just(Either.<Throwable, HashID>createRight(hashID))).onErrorReturn(Either::<Throwable, HashID>createLeft).toBlocking().first();
+        this.readAndWriterGenerator = readAndWriterGenerator;
     }
 
     public void createDocument(String team, String path, String text) {
@@ -135,14 +50,14 @@ public class FixmeCreateDocument {
         try (Jedis jedis = pool.getResource()) {
             LinkedList<HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>>> list = new LinkedList<>();
 
-            list.add(redisReadAndWriterGenerator(team, jedis));
-            list.add(bucketReadAndWriterGenerator(team));
-            list.add(dirReadAndWriterGenerator(team, path));
-            list.add(metaReadAndWriterGenerator(team));
-            list.add(blobReadAndWriterGenerator(team, text));
+            list.add(readAndWriterGenerator.redisReadAndWriterGenerator(team, jedis));
+            list.add(readAndWriterGenerator.bucketReadAndWriterGenerator(team));
+            list.add(readAndWriterGenerator.dirReadAndWriterGenerator(team, path));
+            list.add(readAndWriterGenerator.metaReadAndWriterGenerator(team));
+            list.add(readAndWriterGenerator.blobReadAndWriterGenerator(team, text));
 
-            Observable<HashIDChainFunction<ReplaySubject<HashID>>> writerStream = readAndGenerateWriters(list);
-            write(writerStream).match(err -> {
+            Observable<HashIDChainFunction<ReplaySubject<HashID>>> writerStream = readAndWriterGenerator.readAndWriterGenerate(list);
+            readAndWriterGenerator.write(writerStream).match(err -> {
                 err.printStackTrace();
                 return null;
             }, hashID -> {
@@ -153,99 +68,4 @@ public class FixmeCreateDocument {
         pool.destroy();
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> dirReadAndWriterGenerator(String team, String path) {
-        return (prevHashID, subject) -> dirGenerator(subject, team, prevHashID, path.split("/")).getLeft();
-    }
-
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> blobReadAndWriterGenerator(String team, String text) {
-        return (prevHashID, subject) -> {
-            subject.onNext(blobWriter(team, text));
-            return prevHashID;
-        };
-    }
-
-    public HashIDChainFunction<ReplaySubject<HashID>> blobWriter(String team, String text) {
-        return (prevHashID, subject) -> s3Repository.write(team, text.getBytes()).match(err -> {
-            subject.onError(err);
-            return null;
-        }, nextHashWrite -> {
-            subject.onNext(nextHashWrite);
-            return nextHashWrite;
-        });
-    }
-
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> metaReadAndWriterGenerator(String team) {
-        return (prevHashIDRead, subject) -> {
-            return s3Repository.readObject(team, prevHashIDRead, new TypeReference<Meta>() {
-            }).match(err -> {
-                Meta meta = new Meta();
-                subject.onNext(metaWriter(team, meta));
-                return prevHashIDRead;
-            }, meta -> {
-                meta.previous = meta.hashID;
-                subject.onNext(metaWriter(team, meta));
-                return prevHashIDRead;
-            });
-        };
-    }
-
-    public HashIDChainFunction<ReplaySubject<HashID>> metaWriter(String team, Meta meta) {
-        return (prevHashIDWrite, subject) -> {
-            meta.hashID = prevHashIDWrite;
-            return s3Repository.writeObject(team, meta).match(err -> {
-                subject.onError(err);
-                return null;
-            }, nextHashIDWrite -> {
-                return nextHashIDWrite;
-            });
-        };
-    }
-
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> bucketReadAndWriterGenerator(String team) {
-        return (prevHashIDRead, subject) -> {
-            return s3Repository.readObject(team, prevHashIDRead, new TypeReference<Bucket>(){}).match(
-                    err -> {
-                        subject.onError(err);
-                        return null;
-                    }, bucket -> {
-                        subject.onNext(bucketWriter(team, bucket));
-                        return bucket.hashID;
-                    }
-            );
-        };
-    }
-
-    public HashIDChainFunction<ReplaySubject<HashID>> bucketWriter(String team, Bucket bucket) {
-        return (prevHashIDWrite, obj) -> {
-            bucket.previous = bucket.hashID;
-            bucket.hashID = prevHashIDWrite;
-
-            return s3Repository.writeObject(team, bucket).match(err -> {
-                return null;
-            }, nextHashIDWrite -> {
-                return nextHashIDWrite;
-            });
-        };
-    }
-
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> redisReadAndWriterGenerator(String team, Jedis jedis) {
-        return (prevHashIDRead, subject) -> {
-            return redisRepository.readHashID(jedis, "bucket-" + team).match(
-                    err -> {
-                        subject.onError(err);
-                        return null;
-                    }, hashID -> {
-                        subject.onNext(redisWriter(team, jedis));
-                        return hashID;
-                    }
-            );
-        };
-    }
-
-    public HashIDChainFunction<ReplaySubject<HashID>> redisWriter(String team, Jedis jedis) {
-        return (prevHashIDWrite, obj) -> {
-            redisRepository.writeHashID(jedis, "bucket-" + team, prevHashIDWrite);
-            return prevHashIDWrite;
-        };
-    }
 }
