@@ -44,6 +44,8 @@ public class ReadAndWriterGeneratorTest {
     private HashID hashID5 = new HashID("0000000000000000000000000000000000000000000000000000000000000005");
     private HashID hashID6 = new HashID("0000000000000000000000000000000000000000000000000000000000000006");
 
+    // Won(*3*)Chu FixMe!: わかりやすい変数名にリライトもしくはエイリアスする
+
     private Throwable throwable0 = new Throwable("0");
 
     private HashIDChainFunction<ReplaySubject<HashID>> writeFunc1() {
@@ -61,7 +63,7 @@ public class ReadAndWriterGeneratorTest {
     }
 
     @Test
-    public void readAndGenerateWriters() {
+    public void readAndWriterGenerate() {
         LinkedList<HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>>> list = new LinkedList<>();
         list.add((prevHashID, subject) -> {
             assertNull(prevHashID);
@@ -84,7 +86,7 @@ public class ReadAndWriterGeneratorTest {
     }
 
     @Test
-    public void readAndGenerateWritersWithReadError() {
+    public void readAndWriterGenerateWithReadError() {
         LinkedList<HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>>> list = new LinkedList<>();
         list.add((prevHashID, subject) -> {
             assertNull(prevHashID);

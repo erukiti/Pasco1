@@ -27,7 +27,7 @@ package org.erukiti.pasco1.cli.document;
 
 import org.erukiti.pasco1.cli.Command;
 import org.erukiti.pasco1.di.Configure;
-import org.erukiti.pasco1.service.FixmeCreateDocument;
+import org.erukiti.pasco1.service.Document;
 import org.kohsuke.args4j.Argument;
 
 public class DocumentCreateCommand implements Command {
@@ -41,6 +41,6 @@ public class DocumentCreateCommand implements Command {
     public void run(Configure configure) {
         String document = "ほげー¥n";
 
-        configure.getInjector().getInstance(FixmeCreateDocument.class).createDocument(team, path, document);
+        configure.getInjector().getInstance(Document.class).create(team, path, document);
     }
 }

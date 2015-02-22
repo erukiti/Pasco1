@@ -34,27 +34,27 @@ import rx.subjects.ReplaySubject;
 
 import java.util.*;
 
-public class FixmeCreateDocument {
+public class Document {
     final private JedisPool pool;
     final private ReadAndWriterGenerator readAndWriterGenerator;
 
     @Inject
-    public FixmeCreateDocument(JedisPool pool, ReadAndWriterGenerator readAndWriterGenerator) {
+    public Document(JedisPool pool, ReadAndWriterGenerator readAndWriterGenerator) {
         this.pool = pool;
         this.readAndWriterGenerator = readAndWriterGenerator;
     }
 
-    public void createDocument(String team, String path, String text) {
+    public void create(String team, String path, String text) {
         // Won(*3*)Chu FixMe!: path の正規化
 
         try (Jedis jedis = pool.getResource()) {
             LinkedList<HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>>> list = new LinkedList<>();
 
-            list.add(readAndWriterGenerator.redisReadAndWriterGenerator(team, jedis));
-            list.add(readAndWriterGenerator.bucketReadAndWriterGenerator(team));
-            list.add(readAndWriterGenerator.dirReadAndWriterGenerator(team, path));
-            list.add(readAndWriterGenerator.metaReadAndWriterGenerator(team));
-            list.add(readAndWriterGenerator.blobReadAndWriterGenerator(team, text));
+            list.add(readAndWriterGenerator.redisReadAndWriterGenerate(team, jedis));
+            list.add(readAndWriterGenerator.bucketReadAndWriterGenerate(team));
+            list.add(readAndWriterGenerator.dirReadAndWriterGenerate(team, path));
+            list.add(readAndWriterGenerator.newMetaReadAndWriterGenerate(team));
+            list.add(readAndWriterGenerator.blobReadAndWriterGenerate(team, text));
 
             Observable<HashIDChainFunction<ReplaySubject<HashID>>> writerStream = readAndWriterGenerator.readAndWriterGenerate(list);
             readAndWriterGenerator.write(writerStream).match(err -> {

@@ -129,11 +129,11 @@ public class ReadAndWriterGenerator {
         return subject.concatMap(hashID -> Observable.just(Either.<Throwable, HashID>createRight(hashID))).onErrorReturn(Either::<Throwable, HashID>createLeft).toBlocking().first();
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> dirReadAndWriterGenerator(String team, String path) {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> dirReadAndWriterGenerate(String team, String path) {
         return (prevHashID, subject) -> dirGenerator(subject, team, prevHashID, path.split("/")).getLeft();
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> blobReadAndWriterGenerator(String team, String text) {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> blobReadAndWriterGenerate(String team, String text) {
         return (prevHashID, subject) -> {
             subject.onNext(blobWriter(team, text));
             return prevHashID;
@@ -150,7 +150,7 @@ public class ReadAndWriterGenerator {
         });
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> metaReadAndWriterGenerator(String team) {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> newMetaReadAndWriterGenerate(String team) {
         return (prevHashIDRead, subject) -> {
             return s3Repository.readObject(team, prevHashIDRead, new TypeReference<Meta>() {
             }).match(err -> {
@@ -158,9 +158,8 @@ public class ReadAndWriterGenerator {
                 subject.onNext(metaWriter(team, meta));
                 return prevHashIDRead;
             }, meta -> {
-                meta.previous = meta.hashID;
-                subject.onNext(metaWriter(team, meta));
-                return prevHashIDRead;
+                subject.onError(new Throwable("already document has created."));
+                return null;
             });
         };
     }
@@ -177,7 +176,7 @@ public class ReadAndWriterGenerator {
         };
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> bucketReadAndWriterGenerator(String team) {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> bucketReadAndWriterGenerate(String team) {
         return (prevHashIDRead, subject) -> {
             return s3Repository.readObject(team, prevHashIDRead, new TypeReference<Bucket>(){}).match(
                     err -> {
@@ -204,7 +203,7 @@ public class ReadAndWriterGenerator {
         };
     }
 
-    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> redisReadAndWriterGenerator(String team, Jedis jedis) {
+    public HashIDChainFunction<ReplaySubject<HashIDChainFunction<ReplaySubject<HashID>>>> redisReadAndWriterGenerate(String team, Jedis jedis) {
         return (prevHashIDRead, subject) -> {
             return redisRepository.readHashID(jedis, "bucket-" + team).match(
                     err -> {
